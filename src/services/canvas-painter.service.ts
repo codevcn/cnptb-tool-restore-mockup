@@ -9,11 +9,10 @@ import {
   TPrintLayout,
   TAllowedPrintArea,
   TPrintAreaContainerWrapper,
-  TRect,
   TLayoutSlotForCanvas,
 } from "../types/api"
 import { TMulterFiles } from "../types/global"
-import { domains } from "../configs/contants"
+import { domains, elementDefaultStyles } from "../configs/contants"
 import path from "path"
 import fs from "fs"
 import { mkdir, writeFile } from "fs/promises"
@@ -49,19 +48,23 @@ class CanvasPainterService {
       layoutMode,
     } = data
 
+    const canvasScaleFactor = this.CANVAS_SCALE_FACTOR
+    const viewportRatio = printAreaContainerWrapper.width / printAreaContainerWrapper.height
+    const viewportWidth = printAreaContainerWrapper.width * canvasScaleFactor
+    const viewportHeight = viewportWidth / viewportRatio
+    const viewportWidthRatio = viewportWidth / printAreaContainerWrapper.width
+    const viewportHeightRatio = viewportHeight / printAreaContainerWrapper.height
+    const viewport = {
+      width: viewportWidth,
+      height: viewportHeight,
+    }
+
     // 1. Create base canvas
-    const canvas = createCanvas(
-      printAreaContainerWrapper.width * this.CANVAS_SCALE_FACTOR,
-      printAreaContainerWrapper.height * this.CANVAS_SCALE_FACTOR
-    )
+    const canvas = createCanvas(viewport.width, viewport.height)
     const ctx = canvas.getContext("2d")
     ctx.imageSmoothingEnabled = true
     ctx.save()
-    console.log(
-      `>>> [canvas] Canvas created: ${printAreaContainerWrapper.width * this.CANVAS_SCALE_FACTOR}x${
-        printAreaContainerWrapper.height * this.CANVAS_SCALE_FACTOR
-      }`
-    )
+    console.log(`>>> [canvas] Canvas created: ${viewport.width}x${viewport.height}`)
 
     const imageCache = new Map<string, Image>()
 
@@ -76,7 +79,17 @@ class CanvasPainterService {
       )
       console.log(">>> [canvas] Background image drawn")
 
-      // 3. Draw layout slots if exists
+      // 3. Draw allowed print area outline
+      this.drawOutline(
+        allowedPrintArea,
+        printAreaContainerWrapper,
+        canvas,
+        ctx,
+        viewportWidthRatio,
+        viewportHeightRatio
+      )
+
+      // 4. Draw layout slots if exists
       if (layoutMode !== "no-layout" && layout) {
         await this.drawLayoutSlots(
           layout,
@@ -86,28 +99,34 @@ class CanvasPainterService {
           savedBlobFiles,
           imageCache,
           canvas,
-          ctx
+          ctx,
+          viewportWidthRatio,
+          viewportHeightRatio
         )
         console.log(`>>> [canvas] Layout slots drawn`)
       }
 
-      // 4. Collect and sort all elements by zindex
+      // 5. Collect and sort all elements by zindex
       const allElements: TSingleElementInAll[] = []
       if (printedImageElements) {
-        printedImageElements.forEach((el) =>
+        for (const el of printedImageElements) {
           allElements.push({ type: "printed-image", element: el })
-        )
+        }
       }
       if (stickerElements) {
-        stickerElements.forEach((el) => allElements.push({ type: "sticker", element: el }))
+        for (const el of stickerElements) {
+          allElements.push({ type: "sticker", element: el })
+        }
       }
-      // if (textElements) {
-      //   textElements.forEach((el) => allElements.push({ type: "text", element: el }))
-      // }
+      if (textElements) {
+        for (const el of textElements) {
+          allElements.push({ type: "text", element: el })
+        }
+      }
       // Sort by zindex
       allElements.sort((a, b) => a.element.zindex - b.element.zindex)
 
-      // 5. Draw all elements in order
+      // 6. Draw all elements in order
       for (const { type, element } of allElements) {
         try {
           if (type === "printed-image") {
@@ -116,7 +135,9 @@ class CanvasPainterService {
               savedBlobFiles,
               imageCache,
               canvas,
-              ctx
+              ctx,
+              viewportWidthRatio,
+              viewportHeightRatio
             )
           } else if (type === "sticker") {
             await this.drawStickerElement(
@@ -124,12 +145,19 @@ class CanvasPainterService {
               savedBlobFiles,
               imageCache,
               canvas,
-              ctx
+              ctx,
+              viewportWidthRatio,
+              viewportHeightRatio
+            )
+          } else if (type === "text") {
+            await this.drawTextElement(
+              element as TTextVisualState,
+              canvas,
+              ctx,
+              viewportWidthRatio,
+              viewportHeightRatio
             )
           }
-          // else if (type === "text") {
-          //   await this.drawTextElement(element as TTextVisualState)
-          // }
         } catch (error) {
           console.error(`>>> [canvas] [error] Failed to draw ${type} element:`, error)
           console.error(
@@ -140,8 +168,7 @@ class CanvasPainterService {
       }
       console.log(`>>> [canvas] Drew ${allElements.length} elements`)
 
-      // 6. Draw allowed print area outline
-      this.drawOutline(allowedPrintArea, printAreaContainerWrapper, canvas, ctx)
+      imageCache.clear()
 
       // 7. Export to file
       const outputPath = await this.exportCanvas(data.mockupId, canvas, ctx)
@@ -172,8 +199,8 @@ class CanvasPainterService {
     imageUrl: string,
     files: TMulterFiles,
     imageCache: Map<string, Image>,
-    canvas?: Canvas,
-    ctx?: CanvasRenderingContext2D
+    canvas: Canvas,
+    ctx: CanvasRenderingContext2D
   ): Promise<void> {
     if (!ctx || !canvas) return
 
@@ -211,36 +238,40 @@ class CanvasPainterService {
     wrapper: TPrintAreaContainerWrapper,
     files: TMulterFiles,
     imageCache: Map<string, Image>,
-    canvas?: Canvas,
-    ctx?: CanvasRenderingContext2D
+    canvas: Canvas,
+    ctx: CanvasRenderingContext2D,
+    viewportWidthRatio: number,
+    viewportHeightRatio: number
   ): Promise<void> {
     if (!canvas || !ctx || !layout.slotConfigs || layout.slotConfigs.length === 0) return
-
-    const offsetX = (allowedPrintArea.x - wrapper.x) * this.CANVAS_SCALE_FACTOR
-    const offsetY = (allowedPrintArea.y - wrapper.y) * this.CANVAS_SCALE_FACTOR
+    const offsetX = (allowedPrintArea.x - wrapper.x) * viewportWidthRatio
+    const offsetY = (allowedPrintArea.y - wrapper.y) * viewportHeightRatio
 
     for (const slot of layoutSlotsForCanvas) {
       const { placedImage, height, width, x, y } = slot
+      console.log(">>> [canvas] draw slot:", slot)
       try {
         const image = await this.loadImage(placedImage.imageURL, files, imageCache)
 
         // Parse slot dimensions
-        const slotWidth =
-          this.parseStyleValue(width, allowedPrintArea.width) * this.CANVAS_SCALE_FACTOR
+        const slotWidth = this.parseStyleValue(width - 0.8 * 2, wrapper.width) * viewportWidthRatio
         const slotHeight =
-          this.parseStyleValue(height, allowedPrintArea.height) * this.CANVAS_SCALE_FACTOR
+          this.parseStyleValue(height - 0.8 * 2, wrapper.height) * viewportHeightRatio
         const slotLeft =
-          this.parseStyleValue(x - allowedPrintArea.x, allowedPrintArea.width) *
-          this.CANVAS_SCALE_FACTOR
+          this.parseStyleValue(x - wrapper.x + 0.8, wrapper.width) * viewportWidthRatio
         const slotTop =
-          this.parseStyleValue(y - allowedPrintArea.y, allowedPrintArea.height) *
-          this.CANVAS_SCALE_FACTOR
+          this.parseStyleValue(y - wrapper.y + 0.8, wrapper.height) * viewportHeightRatio
+        console.log(">>> [canvas] draw slots calcu:", {
+          left: x - wrapper.x + 0.8,
+          top: y - wrapper.y + 0.8,
+        })
 
         // Calculate draw dimensions based on fit mode
         let drawWidth = slotWidth
         let drawHeight = slotHeight
-        let drawX = offsetX + slotLeft
-        let drawY = offsetY + slotTop
+        let drawX = slotLeft
+        let drawY = slotTop
+        console.log(">>> [canvas] draw slots draw data:", { drawX, drawY })
 
         if (placedImage.isOriginalFrameImage) {
           // Contain mode
@@ -270,44 +301,42 @@ class CanvasPainterService {
     element: TPrintedImageVisualState,
     files: TMulterFiles,
     imageCache: Map<string, Image>,
-    canvas?: Canvas,
-    ctx?: CanvasRenderingContext2D
+    canvas: Canvas,
+    ctx: CanvasRenderingContext2D,
+    viewportWidthRatio: number,
+    viewportHeightRatio: number
   ): Promise<void> {
     if (!ctx) return
+    console.log(">>> [canvas] printed image element:", element)
 
-    const image = await this.loadImage(element.path, files, imageCache)
+    // Fetch sticker from domain
+    const printedImageUrl = this.toStoredURL(element.path, files, true)
+
+    const image = await this.loadImage(printedImageUrl, files, imageCache)
 
     // Save context state
     ctx.save()
 
     // Calculate dimensions
-    const width = (element.width || image.width) * this.CANVAS_SCALE_FACTOR
-    const height = (element.height || image.height) * this.CANVAS_SCALE_FACTOR
+    const width = (element.width || image.width) * viewportWidthRatio
+    const height = (element.height || image.height) * viewportHeightRatio
     const scale = element.scale || 1
     const angle = element.angle || 0
 
-    // Move to element position (center point for rotation)
-    const centerX = (element.position.x + (width * scale) / 2) * this.CANVAS_SCALE_FACTOR
-    const centerY = (element.position.y + (height * scale) / 2) * this.CANVAS_SCALE_FACTOR
+    // Move to element position center
+    const centerX = element.position.x * viewportWidthRatio + width / 2
+    const centerY = element.position.y * viewportHeightRatio + height / 2
 
     ctx.translate(centerX, centerY)
     ctx.rotate((angle * Math.PI) / 180)
     ctx.scale(scale, scale)
 
-    // // Apply grayscale filter if needed
+    // // Apply grayscale if needed
     // if (element.grayscale && element.grayscale > 0) {
     //   ;(ctx as any).filter = `grayscale(${element.grayscale})`
     // }
 
-    // // Apply clip path if exists
-    // if (element.clippath && element.clippath.type === "circle") {
-    //   const radius = Math.min(width, height) / 2
-    //   ctx.beginPath()
-    //   ctx.arc(0, 0, radius, 0, Math.PI * 2)
-    //   ctx.clip()
-    // }
-
-    // Draw image (centered at origin due to transforms)
+    // Draw sticker
     ctx.drawImage(image, -width / 2, -height / 2, width, height)
 
     // Restore context
@@ -321,10 +350,13 @@ class CanvasPainterService {
     element: TStickerVisualState,
     files: TMulterFiles,
     imageCache: Map<string, Image>,
-    canvas?: Canvas,
-    ctx?: CanvasRenderingContext2D
+    canvas: Canvas,
+    ctx: CanvasRenderingContext2D,
+    viewportWidthRatio: number,
+    viewportHeightRatio: number
   ): Promise<void> {
     if (!ctx) return
+    console.log(">>> [canvas] sticker element:", element)
 
     // Fetch sticker from domain
     const stickerUrl = this.toStoredURL(element.path, files, true)
@@ -335,14 +367,14 @@ class CanvasPainterService {
     ctx.save()
 
     // Calculate dimensions
-    const width = (element.width || image.width) * this.CANVAS_SCALE_FACTOR
-    const height = (element.height || image.height) * this.CANVAS_SCALE_FACTOR
+    const width = (element.width || image.width) * viewportWidthRatio
+    const height = (element.height || image.height) * viewportHeightRatio
     const scale = element.scale || 1
     const angle = element.angle || 0
 
-    // Move to element position
-    const centerX = (element.position.x + (width * scale) / 2) * this.CANVAS_SCALE_FACTOR
-    const centerY = (element.position.y + (height * scale) / 2) * this.CANVAS_SCALE_FACTOR
+    // Move to element position center
+    const centerX = element.position.x * viewportWidthRatio + width / 2
+    const centerY = element.position.y * viewportHeightRatio + height / 2
 
     ctx.translate(centerX, centerY)
     ctx.rotate((angle * Math.PI) / 180)
@@ -365,30 +397,43 @@ class CanvasPainterService {
    */
   private async drawTextElement(
     element: TTextVisualState,
-    canvas?: Canvas,
-    ctx?: CanvasRenderingContext2D
+    canvas: Canvas,
+    ctx: CanvasRenderingContext2D,
+    viewportWidthRatio: number,
+    viewportHeightRatio: number
   ): Promise<void> {
+    console.log(">>> [canvas] text element:", element)
     if (!ctx) return
-
+    const { dimensionOnCollect } = element
+    if (!dimensionOnCollect) {
+      throw new Error("Field dimensionOnCollect is required for text element")
+    }
     // Save context state
     ctx.save()
 
-    // Calculate dimensions
+    // Set text properties
+    const fontSize = element.fontSize || elementDefaultStyles.text.fontSize
+    const fontWeight = element.fontWeight || 400
+    const fontFamily = element.fontFamily || "Arial"
+    ctx.font = `${fontWeight} ${fontSize * viewportHeightRatio}px ${fontFamily}`
+    ctx.fillStyle = element.textColor || "#000000"
+    ctx.textBaseline = "middle" // Align "start point to draw text" to center
+    ctx.textAlign = "center"
+
     const scale = element.scale || 1
     const angle = element.angle || 0
-    const fontSize = element.fontSize || 16
 
-    // Move to element position
-    ctx.translate(element.position.x, element.position.y)
-    ctx.rotate((angle * Math.PI) / 180)
+    // Move to element position top-left
+    const widthAfterScaleCanvas = dimensionOnCollect.offsetWidth * viewportWidthRatio
+    const heightAfterScaleCanvas = dimensionOnCollect.offsetHeight * viewportHeightRatio
+    const posXAfterScaleCanvas = element.position.x * viewportWidthRatio
+    const posYAfterScaleCanvas = element.position.y * viewportHeightRatio
+    const centerX = posXAfterScaleCanvas + widthAfterScaleCanvas / 2
+    const centerY = posYAfterScaleCanvas + heightAfterScaleCanvas / 2
+
+    ctx.translate(centerX, centerY)
     ctx.scale(scale, scale)
-
-    // Set text properties
-    const fontWeight = element.fontWeight || "normal"
-    const fontFamily = element.fontFamily || "Arial"
-    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`
-    ctx.fillStyle = element.textColor || "#000000"
-    ctx.textBaseline = "top"
+    ctx.rotate((angle * Math.PI) / 180)
 
     // Draw text
     ctx.fillText(element.content, 0, 0)
@@ -403,19 +448,26 @@ class CanvasPainterService {
   private drawOutline(
     printArea: TAllowedPrintArea,
     wrapper: TPrintAreaContainerWrapper,
-    canvas?: Canvas,
-    ctx?: CanvasRenderingContext2D
+    canvas: Canvas,
+    ctx: CanvasRenderingContext2D,
+    viewportWidthRatio: number,
+    viewportHeightRatio: number
   ): void {
     if (!ctx) return
 
-    const offsetX = printArea.x - wrapper.x
-    const offsetY = printArea.y - wrapper.y
+    const offsetX = (printArea.x - wrapper.x) * viewportWidthRatio
+    const offsetY = (printArea.y - wrapper.y) * viewportHeightRatio
 
     ctx.save()
     ctx.strokeStyle = "#3b82f6"
     ctx.lineWidth = 1.5
     ctx.setLineDash([5, 5])
-    ctx.strokeRect(offsetX, offsetY, printArea.width, printArea.height)
+    ctx.strokeRect(
+      offsetX,
+      offsetY,
+      printArea.width * viewportWidthRatio,
+      printArea.height * viewportHeightRatio
+    )
     ctx.restore()
   }
 
@@ -424,8 +476,8 @@ class CanvasPainterService {
    */
   private async exportCanvas(
     mockupId: string,
-    canvas?: Canvas,
-    ctx?: CanvasRenderingContext2D
+    canvas: Canvas,
+    ctx: CanvasRenderingContext2D
   ): Promise<string> {
     if (!canvas) throw new Error("Canvas not initialized")
 
@@ -464,36 +516,51 @@ class CanvasPainterService {
 
     let imagePath: string
 
-    // Handle blob URLs (uploaded files)
-    if (url.startsWith("blob:")) {
-      const pathname = path.basename(url).slice(1)
-      const file = files.find((f) => f.originalname.includes(pathname))
-      if (!file) {
-        throw new Error(`File not found for blob URL: ${url}`)
+    try {
+      // Handle blob URLs (uploaded files)
+      if (url.startsWith("blob:")) {
+        const pathname = path.basename(url).slice(1)
+        const file = files.find((f) => f.originalname.includes(pathname))
+        if (!file) {
+          throw new Error(`File not found for blob URL: ${url}`)
+        }
+        imagePath = file.path
       }
-      imagePath = file.path
-    }
-    // Handle HTTP URLs
-    else if (url.startsWith("http://") || url.startsWith("https://")) {
-      // Download to temp
-      const buffer = await this.downloadRemoteImage(url)
-      const tempPath = path.join("storage/temp", `temp_${Date.now()}_${path.basename(url)}`)
-      await mkdir(path.dirname(tempPath), { recursive: true })
-      await writeFile(tempPath, buffer)
-      imagePath = tempPath
-    }
-    // Handle local paths
-    else {
-      imagePath = path.resolve(url)
-    }
+      // Handle HTTP URLs
+      else if (url.startsWith("http://") || url.startsWith("https://")) {
+        // Download to temp
+        const buffer = await this.downloadRemoteImage(url)
+        const tempPath = path.join("storage/temp", `temp_${Date.now()}_${path.basename(url)}`)
+        await mkdir(path.dirname(tempPath), { recursive: true })
+        await writeFile(tempPath, buffer)
+        imagePath = tempPath
+        console.log(`>>> [canvas] Saved temp file: ${tempPath} (${buffer.length} bytes)`)
+      }
+      // Handle local paths
+      else {
+        imagePath = path.resolve(url)
+      }
 
-    // Load image using node-canvas
-    const image = await loadImage(imagePath)
+      // Check if file exists
+      if (!fs.existsSync(imagePath)) {
+        throw new Error(`Image file does not exist: ${imagePath}`)
+      }
 
-    // Cache it
-    imageCache.set(url, image)
+      // Convert unsupported formats (WebP, AVIF) to PNG using Sharp
+      const convertedPath = await this.convertToSupportedFormat(imagePath)
 
-    return image
+      // Load image using node-canvas
+      const image = await loadImage(convertedPath)
+
+      // Cache it
+      imageCache.set(url, image)
+
+      return image
+    } catch (error) {
+      console.error(`>>> [canvas] Failed to load image from: ${url}`)
+      console.error(`>>> [canvas] Error details:`, error)
+      throw error
+    }
   }
 
   /**
@@ -502,7 +569,61 @@ class CanvasPainterService {
   private async downloadRemoteImage(url: string): Promise<Buffer> {
     console.log(`>>> [canvas] Downloading image: ${url}`)
     const response = await axios.get(url, { responseType: "arraybuffer" })
-    return Buffer.from(response.data)
+
+    // Check content type
+    const contentType = response.headers["content-type"] || ""
+    console.log(`>>> [canvas] Response content-type: ${contentType}`)
+
+    if (!contentType.startsWith("image/")) {
+      console.error(`>>> [canvas] Invalid content-type: ${contentType}`)
+      console.error(`>>> [canvas] Response data preview: ${response.data.toString().slice(0, 200)}`)
+      throw new Error(
+        `Invalid image content-type: ${contentType}. Expected image/* but got ${contentType}`
+      )
+    }
+
+    const buffer = Buffer.from(response.data)
+
+    // Check file signature (magic bytes)
+    if (buffer.length < 4) {
+      throw new Error(`Downloaded file too small: ${buffer.length} bytes`)
+    }
+
+    const signature = buffer.toString("hex", 0, 4)
+    console.log(`>>> [canvas] File signature: ${signature}`)
+
+    return buffer
+  }
+
+  /**
+   * Convert unsupported image formats (WebP, AVIF, SVG) to PNG
+   */
+  private async convertToSupportedFormat(imagePath: string): Promise<string> {
+    // Detect format by reading file signature
+    const fileBuffer = await fs.promises.readFile(imagePath)
+    const signature = fileBuffer.toString("hex", 0, 4)
+
+    // Check if conversion is needed
+    const needsConversion =
+      signature === "52494646" || // WebP (RIFF)
+      signature.startsWith("0000001") || // AVIF
+      signature === "3c3f786d" || // SVG (<?xml)
+      signature === "3c737667" // SVG (<svg)
+
+    if (!needsConversion) {
+      // PNG (89504e47), JPEG (ffd8ffe0/ffd8ffe1), GIF (47494638) are supported
+      console.log(`>>> [canvas] Format supported, using original: ${imagePath}`)
+      return imagePath
+    }
+
+    // Convert to PNG
+    console.log(`>>> [canvas] Converting unsupported format (${signature}) to PNG...`)
+    const convertedPath = imagePath.replace(/\.[^.]+$/, "_converted.png")
+
+    await sharp(imagePath).png().toFile(convertedPath)
+
+    console.log(`>>> [canvas] Converted to: ${convertedPath}`)
+    return convertedPath
   }
 
   /**

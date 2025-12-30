@@ -48,7 +48,11 @@ export type TPrintLayout = {
   mountType?: "suggested" | "picked"
 }
 
-type TElementVisualBaseState = {
+type TElementMountType = "from-new" | "from-saved" | "from-template" | "from-layout"
+
+type TMatchOrientation = "width" | "height"
+
+export type TElementVisualBaseState = {
   position: {
     x: number
     y: number
@@ -56,28 +60,13 @@ type TElementVisualBaseState = {
   scale: number
   angle: number
   zindex: number
-}
-
-type TElementMountType = "from-new" | "from-saved" | "from-template" | "from-layout"
-
-type TMatchOrientation = "width" | "height"
-
-export type TPrintedImageVisualState = TStickerVisualState &
-  Partial<{
-    isInitWithLayout: boolean
-  }>
-
-export type TStickerVisualState = TElementVisualBaseState & {
-  id: string
-  path: string
 } & Partial<{
-    mountType: TElementMountType
-    height: number
-    width: number
-    matchOrientation: TMatchOrientation
-    grayscale: number // 0-100 percentage
-    clippath: string
-  }>
+  height: number
+  width: number
+  clippath: string
+  mountType: TElementMountType
+  matchOrientation: TMatchOrientation
+}>
 
 export type TTextVisualState = TElementVisualBaseState & {
   id: string
@@ -85,15 +74,24 @@ export type TTextVisualState = TElementVisualBaseState & {
   content: string
   fontFamily: string
   fontWeight: number
-  mountType?: TElementMountType
-  clippath?: string
 } & Partial<{
-    mountType: TElementMountType
-    height: number
-    width: number
-    matchOrientation: TMatchOrientation
-    clippath: string
     fontSize: number
+    dimensionOnCollect: TSizeInfo & {
+      offsetHeight: number
+      offsetWidth: number
+    }
+  }>
+
+export type TStickerVisualState = TElementVisualBaseState & {
+  id: string
+  path: string
+} & Partial<{
+    grayscale: number // 0-100 percentage
+  }>
+
+export type TPrintedImageVisualState = TStickerVisualState &
+  Partial<{
+    isInitWithLayout: boolean
   }>
 
 export type TLayoutSlotForCanvas = TRect & {
