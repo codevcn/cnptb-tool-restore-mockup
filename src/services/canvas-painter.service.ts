@@ -17,6 +17,7 @@ import { domains } from "../configs/contants"
 import path from "path"
 import fs from "fs"
 import { mkdir, writeFile } from "fs/promises"
+import { generateFullBlobFilePathByDate } from "../utils/helpers"
 
 type TSingleElementInAll = {
   type: "printed-image" | "sticker" | "text"
@@ -24,6 +25,8 @@ type TSingleElementInAll = {
 }
 
 class CanvasPainterService {
+  private readonly CANVAS_SCALE_FACTOR: number = 8
+
   constructor() {}
 
   /**
@@ -47,12 +50,20 @@ class CanvasPainterService {
     } = data
 
     // 1. Create base canvas
-    const canvas = createCanvas(printAreaContainerWrapper.width, printAreaContainerWrapper.height)
-    const ctx = canvas.getContext("2d")
-    const imageCache = new Map<string, Image>()
-    console.log(
-      `>>> [canvas] Canvas created: ${printAreaContainerWrapper.width}x${printAreaContainerWrapper.height}`
+    const canvas = createCanvas(
+      printAreaContainerWrapper.width * this.CANVAS_SCALE_FACTOR,
+      printAreaContainerWrapper.height * this.CANVAS_SCALE_FACTOR
     )
+    const ctx = canvas.getContext("2d")
+    ctx.imageSmoothingEnabled = true
+    ctx.save()
+    console.log(
+      `>>> [canvas] Canvas created: ${printAreaContainerWrapper.width * this.CANVAS_SCALE_FACTOR}x${
+        printAreaContainerWrapper.height * this.CANVAS_SCALE_FACTOR
+      }`
+    )
+
+    const imageCache = new Map<string, Image>()
 
     try {
       // 2. Draw background image if exists
@@ -90,9 +101,9 @@ class CanvasPainterService {
       if (stickerElements) {
         stickerElements.forEach((el) => allElements.push({ type: "sticker", element: el }))
       }
-      if (textElements) {
-        textElements.forEach((el) => allElements.push({ type: "text", element: el }))
-      }
+      // if (textElements) {
+      //   textElements.forEach((el) => allElements.push({ type: "text", element: el }))
+      // }
       // Sort by zindex
       allElements.sort((a, b) => a.element.zindex - b.element.zindex)
 
@@ -115,17 +126,22 @@ class CanvasPainterService {
               canvas,
               ctx
             )
-          } else if (type === "text") {
-            await this.drawTextElement(element as TTextVisualState)
           }
+          // else if (type === "text") {
+          //   await this.drawTextElement(element as TTextVisualState)
+          // }
         } catch (error) {
-          console.warn(`>>> [canvas] Failed to draw ${type} element ${element.id}:`, error)
+          console.error(`>>> [canvas] [error] Failed to draw ${type} element:`, error)
+          console.error(
+            `>>> [canvas] [trace] Failed to draw ${type} element:`,
+            (error as Error).stack
+          )
         }
       }
       console.log(`>>> [canvas] Drew ${allElements.length} elements`)
 
-      // // 6. Draw allowed print area outline
-      // this.drawOutline(allowedPrintArea, printAreaContainerWrapper)
+      // 6. Draw allowed print area outline
+      this.drawOutline(allowedPrintArea, printAreaContainerWrapper, canvas, ctx)
 
       // 7. Export to file
       const outputPath = await this.exportCanvas(data.mockupId, canvas, ctx)
@@ -136,6 +152,17 @@ class CanvasPainterService {
       throw error
     } finally {
     }
+  }
+
+  private toStoredURL(url: string, files: TMulterFiles, isSticker?: boolean): string {
+    if (url.startsWith("blob:")) {
+      const pathname = path.basename(url).slice(1) // remove leading '/'
+      const file = files.find((f) => f.originalname.includes(pathname))
+      if (file) return generateFullBlobFilePathByDate(file.originalname)
+    } else if (isSticker) {
+      return `${domains.fetchStickerDomain}${url}`
+    }
+    return url
   }
 
   /**
@@ -150,7 +177,7 @@ class CanvasPainterService {
   ): Promise<void> {
     if (!ctx || !canvas) return
 
-    const image = await this.loadImage(imageUrl, files, imageCache, canvas, ctx)
+    const image = await this.loadImage(imageUrl, files, imageCache)
 
     // Draw image to fill canvas (contain mode)
     const canvasAspect = canvas.width / canvas.height
@@ -189,19 +216,25 @@ class CanvasPainterService {
   ): Promise<void> {
     if (!canvas || !ctx || !layout.slotConfigs || layout.slotConfigs.length === 0) return
 
-    const offsetX = allowedPrintArea.x - wrapper.x
-    const offsetY = allowedPrintArea.y - wrapper.y
+    const offsetX = (allowedPrintArea.x - wrapper.x) * this.CANVAS_SCALE_FACTOR
+    const offsetY = (allowedPrintArea.y - wrapper.y) * this.CANVAS_SCALE_FACTOR
 
     for (const slot of layoutSlotsForCanvas) {
       const { placedImage, height, width, x, y } = slot
       try {
-        const image = await this.loadImage(placedImage.imageURL, files, imageCache, canvas, ctx)
+        const image = await this.loadImage(placedImage.imageURL, files, imageCache)
 
         // Parse slot dimensions
-        const slotWidth = this.parseStyleValue(width, allowedPrintArea.width)
-        const slotHeight = this.parseStyleValue(height, allowedPrintArea.height)
-        const slotLeft = this.parseStyleValue(x - allowedPrintArea.x, allowedPrintArea.width)
-        const slotTop = this.parseStyleValue(y - allowedPrintArea.y, allowedPrintArea.height)
+        const slotWidth =
+          this.parseStyleValue(width, allowedPrintArea.width) * this.CANVAS_SCALE_FACTOR
+        const slotHeight =
+          this.parseStyleValue(height, allowedPrintArea.height) * this.CANVAS_SCALE_FACTOR
+        const slotLeft =
+          this.parseStyleValue(x - allowedPrintArea.x, allowedPrintArea.width) *
+          this.CANVAS_SCALE_FACTOR
+        const slotTop =
+          this.parseStyleValue(y - allowedPrintArea.y, allowedPrintArea.height) *
+          this.CANVAS_SCALE_FACTOR
 
         // Calculate draw dimensions based on fit mode
         let drawWidth = slotWidth
@@ -242,31 +275,31 @@ class CanvasPainterService {
   ): Promise<void> {
     if (!ctx) return
 
-    const image = await this.loadImage(element.path, files, imageCache, canvas, ctx)
+    const image = await this.loadImage(element.path, files, imageCache)
 
     // Save context state
     ctx.save()
 
     // Calculate dimensions
-    const width = element.width || image.width
-    const height = element.height || image.height
+    const width = (element.width || image.width) * this.CANVAS_SCALE_FACTOR
+    const height = (element.height || image.height) * this.CANVAS_SCALE_FACTOR
     const scale = element.scale || 1
     const angle = element.angle || 0
 
     // Move to element position (center point for rotation)
-    const centerX = element.position.x + (width * scale) / 2
-    const centerY = element.position.y + (height * scale) / 2
+    const centerX = (element.position.x + (width * scale) / 2) * this.CANVAS_SCALE_FACTOR
+    const centerY = (element.position.y + (height * scale) / 2) * this.CANVAS_SCALE_FACTOR
 
     ctx.translate(centerX, centerY)
     ctx.rotate((angle * Math.PI) / 180)
     ctx.scale(scale, scale)
 
-    // Apply grayscale filter if needed
-    if (element.grayscale && element.grayscale > 0) {
-      ;(ctx as any).filter = `grayscale(${element.grayscale})`
-    }
+    // // Apply grayscale filter if needed
+    // if (element.grayscale && element.grayscale > 0) {
+    //   ;(ctx as any).filter = `grayscale(${element.grayscale})`
+    // }
 
-    // Apply clip path if exists
+    // // Apply clip path if exists
     // if (element.clippath && element.clippath.type === "circle") {
     //   const radius = Math.min(width, height) / 2
     //   ctx.beginPath()
@@ -294,33 +327,31 @@ class CanvasPainterService {
     if (!ctx) return
 
     // Fetch sticker from domain
-    const stickerUrl = element.path.startsWith("http")
-      ? element.path
-      : `${domains.fetchStickerDomain}${element.path}`
+    const stickerUrl = this.toStoredURL(element.path, files, true)
 
-    const image = await this.loadImage(stickerUrl, files, imageCache, canvas, ctx)
+    const image = await this.loadImage(stickerUrl, files, imageCache)
 
     // Save context state
     ctx.save()
 
     // Calculate dimensions
-    const width = element.width || image.width
-    const height = element.height || image.height
+    const width = (element.width || image.width) * this.CANVAS_SCALE_FACTOR
+    const height = (element.height || image.height) * this.CANVAS_SCALE_FACTOR
     const scale = element.scale || 1
     const angle = element.angle || 0
 
     // Move to element position
-    const centerX = element.position.x + (width * scale) / 2
-    const centerY = element.position.y + (height * scale) / 2
+    const centerX = (element.position.x + (width * scale) / 2) * this.CANVAS_SCALE_FACTOR
+    const centerY = (element.position.y + (height * scale) / 2) * this.CANVAS_SCALE_FACTOR
 
     ctx.translate(centerX, centerY)
     ctx.rotate((angle * Math.PI) / 180)
     ctx.scale(scale, scale)
 
-    // Apply grayscale if needed
-    if (element.grayscale && element.grayscale > 0) {
-      ;(ctx as any).filter = `grayscale(${element.grayscale})`
-    }
+    // // Apply grayscale if needed
+    // if (element.grayscale && element.grayscale > 0) {
+    //   ;(ctx as any).filter = `grayscale(${element.grayscale})`
+    // }
 
     // Draw sticker
     ctx.drawImage(image, -width / 2, -height / 2, width, height)
@@ -408,7 +439,12 @@ class CanvasPainterService {
     const buffer = canvas.toBuffer("image/png")
 
     // Use Sharp for optimization (optional)
-    await sharp(buffer).png().toFile(outputPath)
+    await sharp(buffer)
+      .png({
+        compressionLevel: 9,
+        palette: false,
+      })
+      .toFile(outputPath)
 
     return outputPath
   }
@@ -419,9 +455,7 @@ class CanvasPainterService {
   private async loadImage(
     url: string,
     files: TMulterFiles,
-    imageCache: Map<string, Image>,
-    canvas?: Canvas,
-    ctx?: CanvasRenderingContext2D
+    imageCache: Map<string, Image>
   ): Promise<Image> {
     // Check cache
     if (imageCache.has(url)) {
