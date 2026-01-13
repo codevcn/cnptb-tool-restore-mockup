@@ -32,12 +32,28 @@ class HtmlGeneratorService {
       stickerElements,
       textElements,
       layoutMode,
+      devicePixelRatio,
     } = data
 
     const viewport: TBrowserViewport = {
       width: printAreaContainerWrapper.width,
       height: printAreaContainerWrapper.height,
     }
+
+    const printContainerBorderWidth: number = parseFloat(printAreaContainerWrapper.borderWidth)
+    const allowedAreaBorderWidth: number = parseFloat(allowedPrintArea.borderWidth)
+    const layoutSlotBorderWidth: number = parseFloat(data.layoutSlotBorderWidth)
+
+    const realPrintContainerBorderWidth: number = Math.round(
+      printContainerBorderWidth / devicePixelRatio
+    )
+
+    console.log(">>> [html] border widths:", {
+      printContainerBorderWidth,
+      allowedAreaBorderWidth,
+      layoutSlotBorderWidth,
+      realPrintContainerBorderWidth,
+    })
 
     return `
       <!DOCTYPE html>
@@ -47,7 +63,11 @@ class HtmlGeneratorService {
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <title>Mockup Restoration</title>
           <style>
-            ${this.generateCSS()}
+            ${this.generateCSS(
+              printContainerBorderWidth,
+              allowedAreaBorderWidth,
+              layoutSlotBorderWidth
+            )}
           </style>
         </head>
         <body
@@ -69,6 +89,7 @@ class HtmlGeneratorService {
               printAreaContainerWrapper,
               allowedPrintArea,
               layoutMode,
+              realPrintContainerBorderWidth,
               layout || undefined
             )}
             ${
@@ -130,7 +151,11 @@ class HtmlGeneratorService {
   /**
    * Generate CSS styles
    */
-  private generateCSS(): string {
+  private generateCSS(
+    printContainerBorderWidth: number,
+    allowedAreaBorderWidth: number,
+    layoutSlotBorderWidth: number
+  ): string {
     return `
       :root {
         --vcn-allowed-print-area-boundary: #3b82f6;
@@ -155,6 +180,7 @@ class HtmlGeneratorService {
       .NAME-print-area-container {
         position: relative;
         overflow: hidden;
+        border: ${printContainerBorderWidth}px solid lightgray;
       }
 
       .NAME-product-image {
@@ -169,9 +195,12 @@ class HtmlGeneratorService {
       }
 
       .NAME-print-area-allowed {
+        display: flex;
+        justify-content: center;
+        align-items: center;
         position: absolute;
         z-index: 6;
-        outline: 1.5px dashed var(--vcn-allowed-print-area-boundary);
+        border: ${allowedAreaBorderWidth}px dashed var(--vcn-allowed-print-area-boundary);
       }
 
       .NAME-slots-displayer {
@@ -188,6 +217,7 @@ class HtmlGeneratorService {
         display: flex;
         justify-content: center;
         align-items: center;
+        border: ${layoutSlotBorderWidth}px dashed #4a5565;
       }
 
       .NAME-frame-placed-image {
@@ -234,6 +264,7 @@ class HtmlGeneratorService {
         white-space: nowrap;
         user-select: none;
         line-height: 1;
+        padding-bottom: 4px;
       }
     `
   }
@@ -257,6 +288,7 @@ class HtmlGeneratorService {
     printAreaContainerWrapper: TPrintAreaContainerWrapper,
     allowedPrintArea: TAllowedPrintArea,
     layoutMode: TLayoutMode,
+    realPrintContainerBorderWidth: number,
     layout?: TPrintLayout
   ): string {
     return `
@@ -264,8 +296,12 @@ class HtmlGeneratorService {
         style="
           width: ${allowedPrintArea.width}px;
           height: ${allowedPrintArea.height}px; 
-          left: ${allowedPrintArea.x - printAreaContainerWrapper.x}px; 
-          top: ${allowedPrintArea.y - printAreaContainerWrapper.y}px;
+          left: ${
+            allowedPrintArea.x - printAreaContainerWrapper.x - realPrintContainerBorderWidth
+          }px; 
+          top: ${
+            allowedPrintArea.y - printAreaContainerWrapper.y - realPrintContainerBorderWidth
+          }px;
         "
         class="NAME-print-area-allowed"
       >

@@ -15,3 +15,7 @@ export const generateFullBlobFilePathByDate = (
 export const generateFilename = (extension: string): string => {
   return `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${extension}`
 }
+
+export const hashUrl = (url: string): string => {
+  return crypto.createHash("sha1").update(url).digest("hex")
+}

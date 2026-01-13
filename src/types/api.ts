@@ -76,10 +76,7 @@ export type TTextVisualState = TElementVisualBaseState & {
   fontWeight: number
 } & Partial<{
     fontSize: number
-    dimensionOnCollect: TSizeInfo & {
-      offsetHeight: number
-      offsetWidth: number
-    }
+    dimensionOnCollect: TSizeInfo
   }>
 
 export type TStickerVisualState = TElementVisualBaseState & {
@@ -124,6 +121,7 @@ export type TPrintAreaContainerWrapper = {
   height: number // in pixels
   x: number // in pixels
   y: number // in pixels
+  borderWidth: string // in pixels
 }
 
 export type TAllowedPrintArea = {
@@ -131,6 +129,7 @@ export type TAllowedPrintArea = {
   height: number // in pixels
   x: number // in pixels
   y: number // in pixels
+  borderWidth: string // in pixels
 }
 
 // ============================================
@@ -138,6 +137,11 @@ export type TAllowedPrintArea = {
 // ============================================
 
 export type TRestoreMockupBodySchema = {
+  /**
+   * Tỷ lệ pixel của thiết bị (devicePixelRatio) - REQUIRED
+   */
+  devicePixelRatio: number
+
   /**
    * ID của mockup đang được restore - REQUIRED
    */
@@ -149,15 +153,15 @@ export type TRestoreMockupBodySchema = {
   printAreaContainerWrapper: TPrintAreaContainerWrapper
 
   /**
-   * Thông tin sản phẩm (optional - để reference/logging)
-   */
-  product: TProductInfo
-
-  /**
    * Cấu hình print area - REQUIRED
    * Xác định kích thước canvas và vùng in
    */
   allowedPrintArea: TAllowedPrintArea
+
+  /**
+   * Thông tin sản phẩm (optional - để reference/logging)
+   */
+  product: TProductInfo
 
   /**
    * Layout mode và config
@@ -170,6 +174,7 @@ export type TRestoreMockupBodySchema = {
   layout?: TPrintLayout | null
 
   layoutSlotsForCanvas: TLayoutSlotForCanvas[]
+  layoutSlotBorderWidth: string // in pixels
 
   /**
    * Danh sách elements - REQUIRED

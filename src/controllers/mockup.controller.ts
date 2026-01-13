@@ -29,12 +29,15 @@ export class MockupController {
       // TRY: Canvas rendering first (PRIMARY METHOD)
       try {
         const startTime = performance.now()
-        outputPath = await canvasPainterService.paintMockupToCanvas(data, files.local_blob_urls)
-        const endTime = performance.now()
-        console.log(`>>> [resm] Canvas rendering took ${Math.round(endTime - startTime)}ms`)
-        method = "canvas"
-        format = "png"
-        console.log("✅ [resm] Canvas rendering succeeded")
+        // outputPath = await canvasPainterService.paintMockupToCanvas(data, files.local_blob_urls)
+        // const endTime = performance.now()
+        // method = "canvas"
+        // format = "png"
+        // console.log(`✅ [resm] Canvas rendering took ${Math.round(endTime - startTime)}ms`)
+
+        const html = await htmlGeneratorService.generateMockupHTML(data, files.local_blob_urls)
+        outputPath = await this.saveHTMLToFile(html, data.mockupId)
+        console.log(">>> [resm] HTML generated")
       } catch (canvasError) {
         console.warn("⚠️ [resm] Canvas rendering failed, falling back to HTML:", canvasError)
         method = "html"
@@ -87,7 +90,7 @@ export class MockupController {
   }
 
   async saveHTMLToFile(html: string, mockupId: TMockupId): Promise<string> {
-    const htmlDir = "/storage/html"
+    const htmlDir = "storage/html"
     await mkdir(htmlDir, { recursive: true })
     const htmlFileName = `mockup--${mockupId}.html`
     const htmlFilePath = path.join(htmlDir, htmlFileName)
