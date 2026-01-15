@@ -1,16 +1,7 @@
-import { domains } from "../configs/contants"
 import crypto from "crypto"
-
-export const generateBlobFilePathByDate = (fileName: string, extensionWithDot?: string): string => {
-  return `/storage/uploads/${fileName}${extensionWithDot ? "." + extensionWithDot : ""}`
-}
-
-export const generateFullBlobFilePathByDate = (
-  fileName: string,
-  extensionWithDot?: string
-): string => {
-  return `${domains.serverDomain}${generateBlobFilePathByDate(fileName, extensionWithDot)}`
-}
+import { endpoints } from "../configs/contants"
+import { TMockupId } from "../types/api"
+import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
 
 export const generateFilename = (extension: string): string => {
   return `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${extension}`
@@ -26,4 +17,14 @@ export const safePath = (inputPath: string): string => {
     throw new Error("Invalid path")
   }
   return inputPath.replace(/\\/g, "/")
+}
+
+export const normalizePath = (inputPath: string): string => {
+  return inputPath.replace(/\\/g, "/").replace(/\/+/g, "/")
+}
+
+export const generateMediaURLByStoredFilePath = (filename: string, mockupId: TMockupId): string => {
+  return `${endpoints.serverEndpoint}/${mockupStoredFilesManager.getMockupStoragePath(
+    mockupId
+  )}/media/${filename}`
 }

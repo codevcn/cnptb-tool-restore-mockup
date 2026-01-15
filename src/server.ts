@@ -22,7 +22,7 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }))
 app.use("/storage/uploads", express.static(path.join(__dirname, "..", "storage", "uploads")))
 
 // Routes
-app.use("/api/mockup", mockupRoutes)
+app.use("/api/v1/mockup", mockupRoutes)
 
 // Health check
 app.get("/health", (req, res) => {

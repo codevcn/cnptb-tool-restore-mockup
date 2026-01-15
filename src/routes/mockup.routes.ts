@@ -1,44 +1,27 @@
 import { NextFunction, Request, Response, Router } from "express"
 import { mockupController } from "../controllers/mockup.controller"
 import multer from "multer"
-import path from "path"
-import fs from "fs"
-import { mkdir, rm } from "fs/promises"
 import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
+import { ERequestPayloadFields } from "../configs/contants"
+import { mkdir, rm } from "fs/promises"
+import { tempDir, uploadDir } from "../configs/upload-file"
 
-// File upload setup
-const createUploadDir = (): string => {
-  const uploadDir = path.resolve("storage/uploads")
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true })
-  }
-  return uploadDir
-}
-const uploadDir = createUploadDir()
-const createTempDir = (): string => {
-  const tempDir = path.resolve("storage/temp")
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true })
-  }
-  return tempDir
-}
-const tempDir = createTempDir()
-
-const storage = multer.diskStorage({
+const diskStorage = multer.diskStorage({
   destination: async (req, file, cb) => {
     try {
       if (!req.mockupId) {
-        cb(new Error("Missing mockup ID in request"), uploadDir)
-      } else {
-        const destination = mockupStoredFilesManager.getMockupStoragePath(req.mockupId)
-        if (destination) {
-          cb(null, destination)
-        } else {
-          cb(new Error("Invalid mockup ID"), uploadDir)
-        }
+        return cb(new Error("Missing mockupId in request"), "")
       }
+      const storagePath = mockupStoredFilesManager.getMockupStoragePath(req.mockupId)
+      console.log(">>> [routes] Storage path:", storagePath)
+      if (!storagePath) {
+        return cb(new Error("Invalid mockup storage path"), "")
+      }
+      const mediaPath = `${storagePath}/media`
+      await mkdir(mediaPath, { recursive: true })
+      cb(null, mediaPath)
     } catch (error) {
-      cb(new Error("Failed to determine destination"), uploadDir)
+      cb(new Error("Failed to determine destination"), "")
     }
   },
   filename: (req, file, cb) => {
@@ -46,17 +29,29 @@ const storage = multer.diskStorage({
   },
 })
 
-const upload = multer({
-  storage,
+const uploadToDisk = multer({
+  storage: diskStorage,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB
   },
   fileFilter: (req, file, cb) => {
-    if (!file.mimetype.startsWith("image/")) {
-      cb(new Error("Only images allowed"))
-      return
+    if (file.fieldname === ERequestPayloadFields.LOCAL_BLOBS) {
+      if (!file.mimetype.startsWith("image/")) {
+        return cb(new Error("local_blobs must be images"))
+      }
+      return cb(null, true)
     }
-    cb(null, true)
+    if (
+      file.fieldname === ERequestPayloadFields.MAIN_DATA ||
+      file.fieldname === ERequestPayloadFields.USER_AGENT_DATA
+    ) {
+      // chấp nhận json / text
+      if (!["application/json", "text/plain", "application/octet-stream"].includes(file.mimetype)) {
+        return cb(new Error(`${file.fieldname} must be json/text`))
+      }
+      return cb(null, true)
+    }
+    cb(new Error(`Unexpected field: ${file.fieldname}`))
   },
 })
 
@@ -68,8 +63,8 @@ const cleanup = async () => {
     console.log(">>> [routes] Directories cleaned:", { uploadDir, tempDir })
 
     // Tạo lại thư mục
-    await mkdir(uploadDir, { recursive: true })
     await mkdir(tempDir, { recursive: true })
+    await mkdir(uploadDir, { recursive: true })
     console.log(">>> [routes] Directories created:", { uploadDir, tempDir })
   } catch (e) {
     console.error(">>> [routes] Warning cleaning directories:", e)
@@ -78,17 +73,24 @@ const cleanup = async () => {
 
 const setupRequestSession = async (req: Request, res: Response, next: NextFunction) => {
   await cleanup()
-  await mockupStoredFilesManager.createMockupStoragePath(req, uploadDir)
+  try {
+    await mockupStoredFilesManager.createMockupStoragePathByRequest(req)
+  } catch (error) {
+    next(error)
+    return
+  }
   next()
 }
 
-const setupMulterMiddleware = upload.fields([
-  { name: "local_blob_urls" }, // nhiều blob
+const saveFilesFormRequest = uploadToDisk.fields([
+  { name: ERequestPayloadFields.LOCAL_BLOBS }, // Nhiều file ảnh
+  { name: ERequestPayloadFields.MAIN_DATA }, // 1 file JSON nhỏ
+  { name: ERequestPayloadFields.USER_AGENT_DATA }, // 1 file JSON nhỏ
 ])
 
 const router = Router()
 
-router.post("/restore", setupRequestSession, setupMulterMiddleware, (req, res) =>
+router.post("/restore", setupRequestSession, saveFilesFormRequest, (req, res) =>
   mockupController.restoreMockup(req, res)
 )
 

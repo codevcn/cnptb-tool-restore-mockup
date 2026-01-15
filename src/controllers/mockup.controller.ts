@@ -4,7 +4,7 @@ import { htmlGeneratorService } from "../services/html-generator.service"
 import { canvasPainterService } from "../services/canvas-painter.service"
 
 type TLocalBlobURLField = {
-  local_blob_urls: Express.Multer.File[]
+  local_blobs: Express.Multer.File[]
 }
 
 export class MockupController {
@@ -15,16 +15,13 @@ export class MockupController {
       console.log(">>> [controller] input data:", data)
 
       const files = req.files as TLocalBlobURLField
-      console.log(">>> [controller] input files:", files.local_blob_urls)
+      console.log(">>> [controller] input files:", files.local_blobs)
 
       try {
         await Promise.all([
           (async () => {
             const htmlStartTime = performance.now()
-            await htmlGeneratorService.generateMockupHTML(
-              structuredClone(data),
-              files.local_blob_urls
-            )
+            await htmlGeneratorService.generateMockupHTML(structuredClone(data), files.local_blobs)
             const htmlEndTime = performance.now()
             console.log(
               `>>> ✅ [controller] HTML generation took ${Math.round(
@@ -34,10 +31,7 @@ export class MockupController {
           })(),
           (async () => {
             const canvasStartTime = performance.now()
-            await canvasPainterService.generateMockupImage(
-              structuredClone(data),
-              files.local_blob_urls
-            )
+            await canvasPainterService.generateMockupImage(structuredClone(data), files.local_blobs)
             const canvasEndTime = performance.now()
             console.log(
               `>>> ✅ [controller] Canvas generation took ${Math.round(

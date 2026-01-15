@@ -10,14 +10,15 @@ import {
   TAllowedPrintArea,
   TPrintAreaContainerWrapper,
   TLayoutSlotForCanvas,
+  TMockupId,
 } from "../types/api"
 import { TMulterFiles } from "../types/global"
-import { domains, elementDefaultStyles } from "../configs/contants"
+import { endpoints, elementDefaultStyles } from "../configs/contants"
 import path from "path"
 import fs from "fs"
 import { mkdir, writeFile } from "fs/promises"
-import { generateFullBlobFilePathByDate } from "../utils/helpers"
 import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
+import { generateMediaURLByStoredFilePath } from "../utils/helpers"
 
 type TStoredMediaFiles = TMulterFiles
 
@@ -49,6 +50,7 @@ class CanvasPainterService {
       textElements,
       layout,
       layoutMode,
+      mockupId,
     } = data
 
     // Tính toán trước khi vẽ lên canvas
@@ -124,6 +126,7 @@ class CanvasPainterService {
           if (type === "printed-image") {
             await this.drawPrintedImageElement(
               element as TPrintedImageVisualState,
+              mockupId,
               storedFiles,
               imageCache,
               canvas,
@@ -132,6 +135,7 @@ class CanvasPainterService {
           } else if (type === "sticker") {
             await this.drawStickerElement(
               element as TStickerVisualState,
+              mockupId,
               storedFiles,
               imageCache,
               canvas,
@@ -162,14 +166,19 @@ class CanvasPainterService {
     }
   }
 
-  private toStoredURL(url: string, files: TMulterFiles, isSticker?: boolean): string {
-    if (url.startsWith("blob:")) {
+  private toStoredURL(
+    mockupId: TMockupId,
+    url: string,
+    files: TMulterFiles,
+    isSticker?: boolean
+  ): string {
+    if (isSticker) {
+      return `${endpoints.publicAssetsEndpoint}${url}`
+    } else if (url.startsWith("blob:")) {
       const pathname = path.basename(url).slice(1) // remove leading '/'
       const file = files.find((f) => f.originalname.includes(pathname))
-      if (file) return generateFullBlobFilePathByDate(file.originalname)
+      if (file) return generateMediaURLByStoredFilePath(file.filename, mockupId)
       else throw new Error(`File not found for blob URL: ${url}`) // nếu client gửi thiếu data cho blob
-    } else if (isSticker) {
-      return `${domains.publicAssetsEndpoint}${url}`
     }
     return url
   }
@@ -326,6 +335,7 @@ class CanvasPainterService {
    */
   private async drawPrintedImageElement(
     element: TPrintedImageVisualState,
+    mockupId: TMockupId,
     files: TMulterFiles,
     imageCache: Map<string, Image>,
     canvas: Canvas,
@@ -334,7 +344,7 @@ class CanvasPainterService {
     console.log(">>> [canvas] printed image element:", element)
 
     // Fetch sticker from domain
-    const printedImageUrl = this.toStoredURL(element.path, files, true)
+    const printedImageUrl = this.toStoredURL(mockupId, element.path, files, true)
 
     const image = await this.loadImage(printedImageUrl, files, imageCache)
 
@@ -372,6 +382,7 @@ class CanvasPainterService {
    */
   private async drawStickerElement(
     element: TStickerVisualState,
+    mockupId: TMockupId,
     files: TMulterFiles,
     imageCache: Map<string, Image>,
     canvas: Canvas,
@@ -380,7 +391,7 @@ class CanvasPainterService {
     console.log(">>> [canvas] sticker element:", element)
 
     // Fetch sticker from domain
-    const stickerUrl = this.toStoredURL(element.path, files, true)
+    const stickerUrl = this.toStoredURL(mockupId, element.path, files, true)
 
     const image = await this.loadImage(stickerUrl, files, imageCache)
 

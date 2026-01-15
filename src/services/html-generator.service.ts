@@ -1,4 +1,4 @@
-import { domains } from "../configs/contants"
+import { endpoints } from "../configs/contants"
 import {
   TAllowedPrintArea,
   TLayoutMode,
@@ -18,9 +18,10 @@ import {
   TReactCSSProperties,
 } from "../types/global"
 import path from "path"
-import { generateFullBlobFilePathByDate } from "../utils/helpers"
 import { mkdir, writeFile } from "fs/promises"
 import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
+import { uploadDir } from "../configs/upload-file"
+import { generateMediaURLByStoredFilePath } from "../utils/helpers"
 
 type TStoredMediaFiles = TMulterFiles
 
@@ -59,7 +60,7 @@ class HtmlGeneratorService {
     )
 
     const defaultFontFamily = "Roboto"
-    const defaultFontURL = `${domains.publicAssetsEndpoint}/fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf`
+    const defaultFontURL = `${endpoints.publicAssetsEndpoint}/fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf`
 
     console.log(">>> [html] border widths:", {
       printContainerBorderWidth,
@@ -98,8 +99,9 @@ class HtmlGeneratorService {
             "
             class="NAME-print-area-container"
           >
-            ${this.generateBackgroundImage(product.mockup.imageURL, storedFiles)}
+            ${this.generateBackgroundImage(product.mockup.imageURL, mockupId, storedFiles)}
             ${this.generateAllowedPrintArea(
+              mockupId,
               storedFiles,
               printAreaContainerWrapper,
               allowedPrintArea,
@@ -110,14 +112,14 @@ class HtmlGeneratorService {
             ${
               printedImageElements
                 ? printedImageElements
-                    .map((el) => this.generatePrintedImageElement(el, storedFiles))
+                    .map((el) => this.generatePrintedImageElement(el, mockupId, storedFiles))
                     .join("\n")
                 : ""
             }
             ${
               stickerElements
                 ? stickerElements
-                    .map((el) => this.generateStickerElement(el, storedFiles))
+                    .map((el) => this.generateStickerElement(el, mockupId, storedFiles))
                     .join("\n")
                 : ""
             }
@@ -158,11 +160,20 @@ class HtmlGeneratorService {
     `
   }
 
-  private toStoredURL(url: string, files: TMulterFiles): string {
-    if (url.startsWith("blob:")) {
+  private toStoredURL(
+    mockupId: TMockupId,
+    url: string,
+    files: TMulterFiles,
+    isSticker?: boolean
+  ): string {
+    console.log(">>> [html] toStoredURL:", { url, isSticker })
+    if (isSticker) {
+      return `${endpoints.publicAssetsEndpoint}${url}`
+    } else if (url.startsWith("blob:")) {
       const pathname = path.basename(url).slice(1) // remove leading '/'
       const file = files.find((f) => f.originalname.includes(pathname))
-      if (file) return generateFullBlobFilePathByDate(file.originalname)
+      if (file) return generateMediaURLByStoredFilePath(file.filename, mockupId)
+      else throw new Error(`File not found for blob URL: ${url}`) // nếu client gửi thiếu data cho blob
     }
     return url
   }
@@ -307,8 +318,8 @@ class HtmlGeneratorService {
   /**
    * Generate background image
    */
-  private generateBackgroundImage(url: string, files: TMulterFiles): string {
-    const fileUrl = this.toStoredURL(url, files)
+  private generateBackgroundImage(url: string, mockupId: TMockupId, files: TMulterFiles): string {
+    const fileUrl = this.toStoredURL(mockupId, url, files)
     return `
       <img 
         class="NAME-product-image" 
@@ -319,6 +330,7 @@ class HtmlGeneratorService {
   }
 
   private generateAllowedPrintArea(
+    mockupId: TMockupId,
     files: TMulterFiles,
     printAreaContainerWrapper: TPrintAreaContainerWrapper,
     allowedPrintArea: TAllowedPrintArea,
@@ -340,7 +352,11 @@ class HtmlGeneratorService {
         "
         class="NAME-print-area-allowed"
       >
-        ${layoutMode !== "no-layout" && layout ? this.generateLayoutHTML(layout, files) : ""}
+        ${
+          layoutMode !== "no-layout" && layout
+            ? this.generateLayoutHTML(layout, mockupId, files)
+            : ""
+        }
       </div>
     `
   }
@@ -348,7 +364,11 @@ class HtmlGeneratorService {
   /**
    * Generate layout HTML
    */
-  private generateLayoutHTML(layout: TPrintLayout, files: TMulterFiles): string {
+  private generateLayoutHTML(
+    layout: TPrintLayout,
+    mockupId: TMockupId,
+    files: TMulterFiles
+  ): string {
     if (!layout.slotConfigs?.length) return ""
 
     const slots = layout.slotConfigs
@@ -359,7 +379,7 @@ class HtmlGeneratorService {
           ? `<img
               style="object-fit: ${placedImage.isOriginalFrameImage ? "contain" : "cover"};"
               class="NAME-frame-placed-image"
-              src="${this.escapeHtml(this.toStoredURL(placedImage.url, files))}"
+              src="${this.escapeHtml(this.toStoredURL(mockupId, placedImage.url, files))}"
               alt="Slot ${slot.id}"
             />`
           : ""
@@ -435,9 +455,10 @@ class HtmlGeneratorService {
    */
   private generatePrintedImageElement(
     element: TPrintedImageVisualState,
+    mockupId: TMockupId,
     files: TMulterFiles
   ): string {
-    const fileUrl = this.toStoredURL(element.path, files)
+    const fileUrl = this.toStoredURL(mockupId, element.path, files)
     const baseStyle = this.initRootElementBaseStyle(element, "printed-image")
     const imgStyle = this.initElementDisplayImageStyle(element.grayscale)
     const mainBoxStyle = this.initElementMainBoxStyle(element)
@@ -461,8 +482,12 @@ class HtmlGeneratorService {
   /**
    * Generate sticker element
    */
-  private generateStickerElement(element: TStickerVisualState, files: TMulterFiles): string {
-    const fileUrl = this.toStoredURL(element.path, files)
+  private generateStickerElement(
+    element: TStickerVisualState,
+    mockupId: TMockupId,
+    files: TMulterFiles
+  ): string {
+    const fileUrl = this.toStoredURL(mockupId, element.path, files, true)
     const baseStyle = this.initRootElementBaseStyle(element, "sticker")
     const imgStyle = this.initElementDisplayImageStyle(element.grayscale)
     const mainBoxStyle = this.initElementMainBoxStyle(element)
@@ -474,7 +499,7 @@ class HtmlGeneratorService {
         <div ${mainBoxStyle ? `style="${mainBoxStyle}"` : ""} class="NAME-element-main-box">
           <img
           class="NAME-element-display"
-          src="${domains.publicAssetsEndpoint}${this.escapeHtml(fileUrl)}"
+          src="${this.escapeHtml(fileUrl)}"
           alt="Sticker ${element.id}"
           ${imgStyle ? `style="${imgStyle}"` : ""}
         />
