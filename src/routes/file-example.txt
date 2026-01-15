@@ -1,0 +1,10 @@
+{
+  "fieldname": "local_blob_urls",
+  "originalname": "ad9d253d-f7a1-4720-842d-2012b9761d20.jpg",
+  "encoding": "7bit",
+  "mimetype": "image/jpeg",
+  "destination": "D:\\D-Documents\\Code_VCN\\Photobooth\\recover-image\\storage\\uploads\\ptm\\2026\\01\\15\\17",
+  "filename": "ad9d253d-f7a1-4720-842d-2012b9761d20.jpg",
+  "path": "D:\\D-Documents\\Code_VCN\\Photobooth\\recover-image\\storage\\uploads\\ptm\\2026\\01\\15\\17\\ad9d253d-f7a1-4720-842d-2012b9761d20.jpg",
+  "size": 442243
+}

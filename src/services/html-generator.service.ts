@@ -2,6 +2,7 @@ import { domains } from "../configs/contants"
 import {
   TAllowedPrintArea,
   TLayoutMode,
+  TMockupId,
   TPrintAreaContainerWrapper,
   TPrintedImageVisualState,
   TPrintLayout,
@@ -11,18 +12,26 @@ import {
 } from "../types/api"
 import {
   TBrowserViewport,
+  TElementType,
   TElementVisualBaseState,
   TMulterFiles,
   TReactCSSProperties,
 } from "../types/global"
 import path from "path"
 import { generateFullBlobFilePathByDate } from "../utils/helpers"
+import { mkdir, writeFile } from "fs/promises"
+import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
+
+type TStoredMediaFiles = TMulterFiles
 
 class HtmlGeneratorService {
   /**
    * Generate complete HTML from mockup data
    */
-  async generateMockupHTML(data: TRestoreMockupBodySchema, files: TMulterFiles): Promise<string> {
+  async generateMockupHTML(
+    data: TRestoreMockupBodySchema,
+    storedFiles: TStoredMediaFiles
+  ): Promise<void> {
     const {
       allowedPrintArea,
       layout,
@@ -33,6 +42,7 @@ class HtmlGeneratorService {
       textElements,
       layoutMode,
       devicePixelRatio,
+      mockupId,
     } = data
 
     const viewport: TBrowserViewport = {
@@ -48,6 +58,9 @@ class HtmlGeneratorService {
       printContainerBorderWidth / devicePixelRatio
     )
 
+    const defaultFontFamily = "Roboto"
+    const defaultFontURL = `${domains.publicAssetsEndpoint}/fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf`
+
     console.log(">>> [html] border widths:", {
       printContainerBorderWidth,
       allowedAreaBorderWidth,
@@ -55,7 +68,7 @@ class HtmlGeneratorService {
       realPrintContainerBorderWidth,
     })
 
-    return `
+    const htmlResult = `
       <!DOCTYPE html>
       <html lang="en">
         <head>
@@ -66,7 +79,9 @@ class HtmlGeneratorService {
             ${this.generateCSS(
               printContainerBorderWidth,
               allowedAreaBorderWidth,
-              layoutSlotBorderWidth
+              layoutSlotBorderWidth,
+              defaultFontFamily,
+              defaultFontURL
             )}
           </style>
         </head>
@@ -83,9 +98,9 @@ class HtmlGeneratorService {
             "
             class="NAME-print-area-container"
           >
-            ${this.generateBackgroundImage(product.mockup.imageURL, files)}
+            ${this.generateBackgroundImage(product.mockup.imageURL, storedFiles)}
             ${this.generateAllowedPrintArea(
-              files,
+              storedFiles,
               printAreaContainerWrapper,
               allowedPrintArea,
               layoutMode,
@@ -95,13 +110,15 @@ class HtmlGeneratorService {
             ${
               printedImageElements
                 ? printedImageElements
-                    .map((el) => this.generatePrintedImageElement(el, files))
+                    .map((el) => this.generatePrintedImageElement(el, storedFiles))
                     .join("\n")
                 : ""
             }
             ${
               stickerElements
-                ? stickerElements.map((el) => this.generateStickerElement(el, files)).join("\n")
+                ? stickerElements
+                    .map((el) => this.generateStickerElement(el, storedFiles))
+                    .join("\n")
                 : ""
             }
             ${textElements ? textElements.map((el) => this.generateTextElement(el)).join("\n") : ""}
@@ -110,6 +127,8 @@ class HtmlGeneratorService {
         ${this.generateScript()}
       </html>
     `
+
+    await this.saveHTMLToFile(htmlResult, mockupId)
   }
 
   private generateScript(): string {
@@ -154,9 +173,19 @@ class HtmlGeneratorService {
   private generateCSS(
     printContainerBorderWidth: number,
     allowedAreaBorderWidth: number,
-    layoutSlotBorderWidth: number
+    layoutSlotBorderWidth: number,
+    defaultFontFamily: string,
+    defaultFontURL: string
   ): string {
     return `
+      @font-face {
+        font-family: "${defaultFontFamily}";
+        src: url("${defaultFontURL}") format("truetype-variations");
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+
       :root {
         --vcn-allowed-print-area-boundary: #3b82f6;
       }
@@ -165,12 +194,18 @@ class HtmlGeneratorService {
         box-sizing: border-box;
       }
 
-      p,h1,h2,h3,h4,h5,h6 {
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
         margin: 0;
       }
 
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-family: "${defaultFontFamily}", system-ui, -apple-system, sans-serif;
         background-color: transparent;
         overflow: hidden;
         margin: 0;
@@ -264,7 +299,7 @@ class HtmlGeneratorService {
         white-space: nowrap;
         user-select: none;
         line-height: 1;
-        padding-bottom: 4px;
+        padding: 4px 0;
       }
     `
   }
@@ -352,7 +387,7 @@ class HtmlGeneratorService {
   /**
    * Generate base style for element
    */
-  private initRootElementBaseStyle(element: TElementVisualBaseState): string {
+  private initRootElementBaseStyle(element: TElementVisualBaseState, type: TElementType): string {
     const { position, scale, angle, zindex, height, width } = element
 
     let styles: Record<string, string> = {}
@@ -361,7 +396,10 @@ class HtmlGeneratorService {
       styles.top = `${position.y}px`
     }
     if (zindex) styles["z-index"] = `${zindex}`
-    if (width) styles.width = `${width}px`
+    if (width) {
+      if (type === "text") styles.width = "auto"
+      else styles.width = `${width}px`
+    }
     if (height) styles.height = `${height}px`
 
     let transforms: string[] = []
@@ -400,7 +438,7 @@ class HtmlGeneratorService {
     files: TMulterFiles
   ): string {
     const fileUrl = this.toStoredURL(element.path, files)
-    const baseStyle = this.initRootElementBaseStyle(element)
+    const baseStyle = this.initRootElementBaseStyle(element, "printed-image")
     const imgStyle = this.initElementDisplayImageStyle(element.grayscale)
     const mainBoxStyle = this.initElementMainBoxStyle(element)
     return `
@@ -425,7 +463,7 @@ class HtmlGeneratorService {
    */
   private generateStickerElement(element: TStickerVisualState, files: TMulterFiles): string {
     const fileUrl = this.toStoredURL(element.path, files)
-    const baseStyle = this.initRootElementBaseStyle(element)
+    const baseStyle = this.initRootElementBaseStyle(element, "sticker")
     const imgStyle = this.initElementDisplayImageStyle(element.grayscale)
     const mainBoxStyle = this.initElementMainBoxStyle(element)
     return `
@@ -436,7 +474,7 @@ class HtmlGeneratorService {
         <div ${mainBoxStyle ? `style="${mainBoxStyle}"` : ""} class="NAME-element-main-box">
           <img
           class="NAME-element-display"
-          src="${domains.fetchStickerDomain}${this.escapeHtml(fileUrl)}"
+          src="${domains.publicAssetsEndpoint}${this.escapeHtml(fileUrl)}"
           alt="Sticker ${element.id}"
           ${imgStyle ? `style="${imgStyle}"` : ""}
         />
@@ -449,7 +487,7 @@ class HtmlGeneratorService {
    * Generate text element
    */
   private generateTextElement(element: TTextVisualState): string {
-    const baseStyle = this.initRootElementBaseStyle(element)
+    const baseStyle = this.initRootElementBaseStyle(element, "text")
     const mainBoxStyle = this.initElementMainBoxStyle(element)
     const textStyles = [
       `color: ${element.textColor}`,
@@ -478,6 +516,8 @@ class HtmlGeneratorService {
 
   /**
    * Convert style object to string
+   * @param styleObj Style object
+   * @returns Style string
    */
   private styleObjectToString(styleObj: TReactCSSProperties): string {
     let result = ""
@@ -493,6 +533,8 @@ class HtmlGeneratorService {
 
   /**
    * Convert camelCase to kebab-case
+   * @param str Input string
+   * @returns Kebab-case string
    */
   private camelToKebab(str: string): string {
     return str.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
@@ -500,6 +542,8 @@ class HtmlGeneratorService {
 
   /**
    * Escape HTML to prevent XSS
+   * @param text Input text
+   * @returns Escaped text
    */
   private escapeHtml(text: string): string {
     const map: Record<string, string> = {
@@ -510,6 +554,25 @@ class HtmlGeneratorService {
       "'": "&#039;",
     }
     return text.replace(/[&<>"']/g, (m) => map[m])
+  }
+
+  /**
+   * Save generated HTML to a file
+   * @param html Generated HTML content
+   * @param mockupId Identifier for the mockup
+   * @returns Path to the saved HTML file
+   */
+  private async saveHTMLToFile(html: string, mockupId: TMockupId): Promise<string> {
+    const pathToStoredFileDir = mockupStoredFilesManager.getMockupStoragePath(mockupId)
+    if (!pathToStoredFileDir) {
+      throw new Error("Invalid stored file path")
+    }
+    const dirToStore = `${pathToStoredFileDir}/html`
+    await mkdir(dirToStore, { recursive: true })
+    const htmlFileName = `mockup--${mockupId}.html`
+    const htmlFilePath = path.join(dirToStore, htmlFileName)
+    await writeFile(htmlFilePath, html)
+    return htmlFilePath
   }
 }
 

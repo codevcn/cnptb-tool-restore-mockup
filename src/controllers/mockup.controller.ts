@@ -1,112 +1,73 @@
 import { Request, Response } from "express"
-import { TMockupId, TRestoreMockupBodySchema } from "../types/api"
+import { TRestoreMockupBodySchema } from "../types/api"
 import { htmlGeneratorService } from "../services/html-generator.service"
 import { canvasPainterService } from "../services/canvas-painter.service"
-import { writeFile, mkdir } from "fs/promises"
-import path from "path"
 
 type TLocalBlobURLField = {
   local_blob_urls: Express.Multer.File[]
 }
 
 export class MockupController {
-  /**
-   * POST /api/mockup/restore
-   */
   async restoreMockup(req: Request, res: Response) {
     const startTime = performance.now()
     try {
       const data = JSON.parse(req.body.main_data) as TRestoreMockupBodySchema
-      console.log(">>> [resm] input data:", data)
+      console.log(">>> [controller] input data:", data)
 
       const files = req.files as TLocalBlobURLField
-      console.log(">>> [resm] input files:", files.local_blob_urls)
+      console.log(">>> [controller] input files:", files.local_blob_urls)
 
-      let outputPath: string | null = null
-      let method: "canvas" | "html" = "canvas"
-      let format: "png" | "html" = "png"
-
-      // TRY: Canvas rendering first (PRIMARY METHOD)
       try {
-        const startTime = performance.now()
-        // outputPath = await canvasPainterService.paintMockupToCanvas(data, files.local_blob_urls)
-        // const endTime = performance.now()
-        // method = "canvas"
-        // format = "png"
-        // console.log(`✅ [resm] Canvas rendering took ${Math.round(endTime - startTime)}ms`)
-
-        const html = await htmlGeneratorService.generateMockupHTML(data, files.local_blob_urls)
-        outputPath = await this.saveHTMLToFile(html, data.mockupId)
-        console.log(">>> [resm] HTML generated")
-      } catch (canvasError) {
-        console.warn("⚠️ [resm] Canvas rendering failed, falling back to HTML:", canvasError)
-        method = "html"
-        format = "html"
-
-        // // FALLBACK: HTML generation
-        // try {
-        //   const html = await htmlGeneratorService.generateMockupHTML(data, files.local_blob_urls)
-        //   outputPath = await this.saveHTMLToFile(html, data.mockupId)
-        //   console.log("✅ [resm] HTML fallback succeeded")
-        // } catch (htmlError) {
-        //   console.error("❌ [resm] Both canvas and HTML rendering failed")
-        //   throw htmlError
-        // }
-        outputPath = "dummy_path"
+        await Promise.all([
+          (async () => {
+            const htmlStartTime = performance.now()
+            await htmlGeneratorService.generateMockupHTML(
+              structuredClone(data),
+              files.local_blob_urls
+            )
+            const htmlEndTime = performance.now()
+            console.log(
+              `>>> ✅ [controller] HTML generation took ${Math.round(
+                htmlEndTime - htmlStartTime
+              )}ms`
+            )
+          })(),
+          (async () => {
+            const canvasStartTime = performance.now()
+            await canvasPainterService.generateMockupImage(
+              structuredClone(data),
+              files.local_blob_urls
+            )
+            const canvasEndTime = performance.now()
+            console.log(
+              `>>> ✅ [controller] Canvas generation took ${Math.round(
+                canvasEndTime - canvasStartTime
+              )}ms`
+            )
+          })(),
+        ])
+      } catch (err) {
+        console.log(">>> ❌ [controller] Canvas error:", err)
+        throw new Error("Error generating mockup canvas or HTML")
       }
 
       const endTime = performance.now()
       const processingTime = Math.round(endTime - startTime)
+      console.log(`>>> ✅ [controller] Total processing took ${processingTime}ms`)
 
-      // Get file URL
-      const outputUrl = this.getPublicUrl(outputPath, format)
-
-      res.json({
+      return res.json({
         success: true,
-        method,
-        format,
-        outputPath,
-        outputUrl,
         metadata: {
           processingTime,
-          mockupId: data.mockupId,
         },
       })
-
-      console.log(`✅ [resm] Mockup restored successfully in ${processingTime}ms using ${method}`)
     } catch (error) {
-      console.error("❌ [resm] Error restoring mockup:", error)
-      res.status(500).json({ success: false, error: (error as Error).message })
+      if (error instanceof Error) {
+        console.error(">>> ❌ [controller] Error restoring mockup:", error)
+        return res.status(500).json({ success: false, error: error.message })
+      }
+      return res.status(500).json({ success: false, error: "Unknown error restoring mockup" })
     }
-  }
-
-  private getPublicUrl(filePath: string, format: "png" | "html"): string {
-    const filename = path.basename(filePath)
-    if (format === "png") {
-      return `http://localhost:4000/storage/canvas/${filename}`
-    } else {
-      return `http://localhost:4000/storage/html/${filename}`
-    }
-  }
-
-  async saveHTMLToFile(html: string, mockupId: TMockupId): Promise<string> {
-    const htmlDir = "storage/html"
-    await mkdir(htmlDir, { recursive: true })
-    const htmlFileName = `mockup--${mockupId}.html`
-    const htmlFilePath = path.join(htmlDir, htmlFileName)
-    await writeFile(htmlFilePath, html)
-    return htmlFilePath
-  }
-
-  /**
-   * GET /api/mockup/health
-   */
-  async healthCheck(req: Request, res: Response) {
-    res.json({
-      status: "ok",
-      puppeteer: "ready",
-      timestamp: Date.now(),
-    })
   }
 }
 

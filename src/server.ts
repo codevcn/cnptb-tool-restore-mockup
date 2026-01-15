@@ -1,24 +1,25 @@
-import express from "express"
+import "./types"
+import "dotenv/config"
+import express, { NextFunction, Request, Response } from "express"
 import cors from "cors"
-import dotenv from "dotenv"
 import path from "path"
 import mockupRoutes from "./routes/mockup.routes"
-
-// Load env
-dotenv.config()
+import { HttpStatusCode } from "axios"
 
 const app = express()
 const PORT = process.env.PORT || 4000
 
 // Middleware
-app.use(cors())
+app.use(
+  cors({
+    origin: "*",
+  })
+)
 app.use(express.json({ limit: "50mb" }))
 app.use(express.urlencoded({ extended: true, limit: "50mb" }))
 
 // Static files - Match với URL từ client
 app.use("/storage/uploads", express.static(path.join(__dirname, "..", "storage", "uploads")))
-app.use("/storage/canvas", express.static(path.join(__dirname, "..", "storage", "canvas")))
-app.use("/storage/html", express.static(path.join(__dirname, "..", "storage", "html")))
 
 // Routes
 app.use("/api/mockup", mockupRoutes)
@@ -29,12 +30,12 @@ app.get("/health", (req, res) => {
 })
 
 // Error handler
-app.use((err: any, req: any, res: any, next: any) => {
-  console.error("Server error:", err)
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  console.error(">>> Server error:", err)
   res.status(500).json({
     success: false,
     error: {
-      code: "INTERNAL_ERROR",
+      code: HttpStatusCode.InternalServerError,
       message: err.message || "Internal server error",
     },
   })
@@ -43,19 +44,18 @@ app.use((err: any, req: any, res: any, next: any) => {
 // Initialize và start server
 async function start() {
   app.listen(PORT, () => {
-    console.log(`✅ Server running on http://localhost:${PORT}`)
-    console.log(`📡 API endpoint: http://localhost:${PORT}/api/mockup/restore`)
+    console.log(`>>> ✅ Server running on http://localhost:${PORT}`)
   })
 }
 
 // Graceful shutdown
 process.on("SIGINT", async () => {
-  console.log("\n🛑 Shutting down server...")
+  console.log("\n>>> 🛑 Shutting down server...")
   process.exit(0)
 })
 
 process.on("SIGTERM", async () => {
-  console.log("\n🛑 Shutting down server...")
+  console.log("\n>>> 🛑 Shutting down server...")
   process.exit(0)
 })
 

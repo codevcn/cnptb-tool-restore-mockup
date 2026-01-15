@@ -17,6 +17,9 @@ import path from "path"
 import fs from "fs"
 import { mkdir, writeFile } from "fs/promises"
 import { generateFullBlobFilePathByDate } from "../utils/helpers"
+import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
+
+type TStoredMediaFiles = TMulterFiles
 
 type TSingleElementInAll = {
   type: "printed-image" | "sticker" | "text"
@@ -31,10 +34,10 @@ class CanvasPainterService {
   /**
    * Main method: Paint mockup to canvas and export PNG
    */
-  async paintMockupToCanvas(
+  async generateMockupImage(
     data: TRestoreMockupBodySchema,
-    savedBlobFiles: TMulterFiles
-  ): Promise<string> {
+    storedFiles: TStoredMediaFiles
+  ): Promise<void> {
     console.log(">>> [canvas] Starting canvas painting with node-canvas...")
 
     const {
@@ -68,7 +71,7 @@ class CanvasPainterService {
       // 2. Draw background image if exists
       await this.drawBackgroundImage(
         product.mockup.imageURL,
-        savedBlobFiles,
+        storedFiles,
         imageCache,
         originalContainer,
         ctx
@@ -85,7 +88,7 @@ class CanvasPainterService {
           data.layoutSlotsForCanvas,
           allowedPrintArea,
           originalContainer,
-          savedBlobFiles,
+          storedFiles,
           imageCache,
           canvas,
           ctx
@@ -121,7 +124,7 @@ class CanvasPainterService {
           if (type === "printed-image") {
             await this.drawPrintedImageElement(
               element as TPrintedImageVisualState,
-              savedBlobFiles,
+              storedFiles,
               imageCache,
               canvas,
               ctx
@@ -129,7 +132,7 @@ class CanvasPainterService {
           } else if (type === "sticker") {
             await this.drawStickerElement(
               element as TStickerVisualState,
-              savedBlobFiles,
+              storedFiles,
               imageCache,
               canvas,
               ctx
@@ -150,11 +153,9 @@ class CanvasPainterService {
       this.clearCache(imageCache)
 
       // 7. Export to file
-      const outputPath = await this.exportCanvas(data.mockupId, canvas, ctx)
-
-      return outputPath
+      await this.exportCanvas(data.mockupId, canvas)
     } catch (error) {
-      console.error("❌ [canvas] Error during canvas painting:", error)
+      console.error(">>> ❌ [canvas] Error during canvas painting:", error)
       throw error
     } finally {
       this.clearCache(imageCache)
@@ -168,7 +169,7 @@ class CanvasPainterService {
       if (file) return generateFullBlobFilePathByDate(file.originalname)
       else throw new Error(`File not found for blob URL: ${url}`) // nếu client gửi thiếu data cho blob
     } else if (isSticker) {
-      return `${domains.fetchStickerDomain}${url}`
+      return `${domains.publicAssetsEndpoint}${url}`
     }
     return url
   }
@@ -465,34 +466,6 @@ class CanvasPainterService {
   }
 
   /**
-   * Export canvas to PNG file
-   */
-  private async exportCanvas(
-    mockupId: string,
-    canvas: Canvas,
-    ctx: CanvasRenderingContext2D
-  ): Promise<string> {
-    const canvasDir = path.resolve("storage/canvas")
-    await mkdir(canvasDir, { recursive: true })
-
-    const filename = `mockup_${mockupId}.png`
-    const outputPath = path.join(canvasDir, filename)
-
-    // Get canvas buffer
-    const buffer = canvas.toBuffer("image/png")
-
-    // Use Sharp for optimization (optional)
-    await sharp(buffer)
-      .png({
-        compressionLevel: 9,
-        palette: false,
-      })
-      .toFile(outputPath)
-
-    return outputPath
-  }
-
-  /**
    * Load image from URL or local file
    */
   private async loadImage(
@@ -642,6 +615,34 @@ class CanvasPainterService {
    */
   clearCache(imageCache: Map<string, Image>): void {
     imageCache.clear()
+  }
+
+  /**
+   * Export canvas to PNG file
+   */
+  private async exportCanvas(mockupId: string, canvas: Canvas): Promise<string> {
+    const pathToStoredFileDir = mockupStoredFilesManager.getMockupStoragePath(mockupId)
+    if (!pathToStoredFileDir) {
+      throw new Error("Invalid stored file path")
+    }
+    const dirToStore = `${pathToStoredFileDir}/canvas`
+    await mkdir(dirToStore, { recursive: true })
+
+    const filename = `mockup--${mockupId}.png`
+    const outputPath = path.join(dirToStore, filename)
+
+    // Get canvas buffer
+    const buffer = canvas.toBuffer("image/png")
+
+    // Use Sharp for optimization (optional)
+    await sharp(buffer)
+      .png({
+        compressionLevel: 9,
+        palette: false,
+      })
+      .toFile(outputPath)
+
+    return outputPath
   }
 }
 

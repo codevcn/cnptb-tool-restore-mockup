@@ -49,3 +49,5 @@ export type TPosition = {
   x: number
   y: number
 }
+
+export type TElementType = "text" | "sticker" | "printed-image"

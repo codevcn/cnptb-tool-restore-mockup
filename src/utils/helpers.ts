@@ -19,3 +19,11 @@ export const generateFilename = (extension: string): string => {
 export const hashUrl = (url: string): string => {
   return crypto.createHash("sha1").update(url).digest("hex")
 }
+
+export const safePath = (inputPath: string): string => {
+  // Chặn ../
+  if (inputPath.includes("..")) {
+    throw new Error("Invalid path")
+  }
+  return inputPath.replace(/\\/g, "/")
+}

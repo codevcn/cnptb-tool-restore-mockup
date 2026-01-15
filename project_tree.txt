@@ -1,0 +1,48 @@
+Tree view of: D:\D-Documents\Code_VCN\Photobooth\recover-image
+
+├── .env
+├── .github
+│   └── copilot-instructions.md
+├── .gitignore
+├── .prettierignore
+├── .prettierrc.json
+├── check-ts.cmd
+├── dev.cmd
+├── nodemon.json
+├── note.md
+├── package-lock.json
+├── package.json
+├── print_project_tree.py
+├── project_tree.txt
+├── src
+│   ├── configs
+│   │   ├── contants.ts
+│   │   └── mockup-stored-files-manager.ts
+│   ├── controllers
+│   │   └── mockup.controller.ts
+│   ├── routes
+│   │   ├── file-example.txt
+│   │   └── mockup.routes.ts
+│   ├── server.ts
+│   ├── services
+│   │   ├── canvas-painter.service.ts
+│   │   └── html-generator.service.ts
+│   ├── types
+│   │   ├── api.ts
+│   │   ├── express.d.ts
+│   │   └── global.ts
+│   └── utils
+│       └── helpers.ts
+├── storage
+├── tsconfig.json
+└── warehouse
+    ├── html
+    │   ├── nnn.html
+    │   └── testing.html
+    └── images
+        └── remote
+            ├── 19dbd64fa311370989a8458931a3636bd9894a2e.jpg
+            ├── 605521c3e5eb297c21d7742a7df0eb6bb3ee3233.png
+            ├── 795abbfb1681984182b45bbdfeec2877105e30bf.png
+            ├── 9a05aff0d20787a9d5bf763b43b6b2666d3d9be6.jpg
+            └── e10b50d636fb2e87577063bf452033c8f4b9e87b.png

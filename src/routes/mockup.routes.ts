@@ -4,27 +4,54 @@ import multer from "multer"
 import path from "path"
 import fs from "fs"
 import { mkdir, rm } from "fs/promises"
+import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
 
 // File upload setup
-const uploadDir = path.resolve("storage/uploads")
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true })
+const createUploadDir = (): string => {
+  const uploadDir = path.resolve("storage/uploads")
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true })
+  }
+  return uploadDir
 }
+const uploadDir = createUploadDir()
+const createTempDir = (): string => {
+  const tempDir = path.resolve("storage/temp")
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true })
+  }
+  return tempDir
+}
+const tempDir = createTempDir()
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir)
+  destination: async (req, file, cb) => {
+    try {
+      if (!req.mockupId) {
+        cb(new Error("Missing mockup ID in request"), uploadDir)
+      } else {
+        const destination = mockupStoredFilesManager.getMockupStoragePath(req.mockupId)
+        if (destination) {
+          cb(null, destination)
+        } else {
+          cb(new Error("Invalid mockup ID"), uploadDir)
+        }
+      }
+    } catch (error) {
+      cb(new Error("Failed to determine destination"), uploadDir)
+    }
   },
   filename: (req, file, cb) => {
     cb(null, file.originalname)
   },
 })
+
 const upload = multer({
   storage,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB
   },
   fileFilter: (req, file, cb) => {
-    console.log(">>> [multer] File filter:", file)
     if (!file.mimetype.startsWith("image/")) {
       cb(new Error("Only images allowed"))
       return
@@ -33,42 +60,36 @@ const upload = multer({
   },
 })
 
-const cleanup = async (req: Request, res: Response, next: NextFunction) => {
+const cleanup = async () => {
   try {
-    // làm sạch các thư mục
-    const canvasDir = "storage/canvas"
-    const htmlDir = "storage/html"
-    const uploadsDir = "storage/uploads"
-    const tempDir = "storage/temp"
-
     // Xoá thư mục nếu tồn tại
     await rm(tempDir, { recursive: true, force: true })
-    await rm(uploadsDir, { recursive: true, force: true })
-    await rm(canvasDir, { recursive: true, force: true })
-    await rm(htmlDir, { recursive: true, force: true })
-    console.log(">>> [resm] Directories cleaned:", { uploadsDir, canvasDir, htmlDir })
-    await mkdir(uploadsDir, { recursive: true })
-    await mkdir(canvasDir, { recursive: true })
-    await mkdir(htmlDir, { recursive: true })
+    await rm(uploadDir, { recursive: true, force: true })
+    console.log(">>> [routes] Directories cleaned:", { uploadDir, tempDir })
+
+    // Tạo lại thư mục
+    await mkdir(uploadDir, { recursive: true })
     await mkdir(tempDir, { recursive: true })
-    console.log(">>> [resm] Directories created:", { uploadsDir, canvasDir, htmlDir })
+    console.log(">>> [routes] Directories created:", { uploadDir, tempDir })
   } catch (e) {
-    console.error(">>> [resm] Warning cleaning directories:", e)
+    console.error(">>> [routes] Warning cleaning directories:", e)
   }
+}
+
+const setupRequestSession = async (req: Request, res: Response, next: NextFunction) => {
+  await cleanup()
+  await mockupStoredFilesManager.createMockupStoragePath(req, uploadDir)
   next()
 }
 
-const setupMulter = () => {
-  return upload.fields([
-    { name: "local_blob_urls" }, // nhiều blob
-  ])
-}
+const setupMulterMiddleware = upload.fields([
+  { name: "local_blob_urls" }, // nhiều blob
+])
 
 const router = Router()
 
-router.post("/restore", cleanup, setupMulter(), (req, res) =>
+router.post("/restore", setupRequestSession, setupMulterMiddleware, (req, res) =>
   mockupController.restoreMockup(req, res)
 )
-router.get("/health", (req, res) => mockupController.healthCheck(req, res))
 
 export default router
