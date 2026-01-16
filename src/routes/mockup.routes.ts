@@ -3,8 +3,8 @@ import { mockupController } from "../controllers/mockup.controller"
 import multer from "multer"
 import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
 import { ERequestPayloadFields } from "../configs/contants"
-import { mkdir, rm } from "fs/promises"
-import { tempDir, uploadDir } from "../configs/upload-file"
+import { mkdir } from "fs/promises"
+import { cleanup } from "../dev/dev"
 
 const diskStorage = multer.diskStorage({
   destination: async (req, file, cb) => {
@@ -54,22 +54,6 @@ const uploadToDisk = multer({
     cb(new Error(`Unexpected field: ${file.fieldname}`))
   },
 })
-
-const cleanup = async () => {
-  try {
-    // Xoá thư mục nếu tồn tại
-    await rm(tempDir, { recursive: true, force: true })
-    await rm(uploadDir, { recursive: true, force: true })
-    console.log(">>> [routes] Directories cleaned:", { uploadDir, tempDir })
-
-    // Tạo lại thư mục
-    await mkdir(tempDir, { recursive: true })
-    await mkdir(uploadDir, { recursive: true })
-    console.log(">>> [routes] Directories created:", { uploadDir, tempDir })
-  } catch (e) {
-    console.error(">>> [routes] Warning cleaning directories:", e)
-  }
-}
 
 const setupRequestSession = async (req: Request, res: Response, next: NextFunction) => {
   await cleanup()

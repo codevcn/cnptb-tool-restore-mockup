@@ -7,7 +7,7 @@ import { EClientRequestHeaders } from "./contants"
 import { normalizePath } from "../utils/helpers"
 
 type TMockupSessionData = {
-  destination: string // đường dẫn lưu trữ mockup, bắt đầu từ uploadDir
+  destination: string // đường dẫn lưu trữ mockup: upload dir / location / year / month / day / hour / mockupId / (canvas, html, media)
 }
 
 class MockupStoredFilesManager {
@@ -74,6 +74,10 @@ class MockupStoredFilesManager {
 
   createMockupDirectory = async (destination: string) => {
     await mkdir(destination, { recursive: true })
+  }
+
+  logForDebug = () => {
+    console.log(">>> [stored] Current stored mockups:", [...this.storedMockups.entries()])
   }
 }
 export const mockupStoredFilesManager = new MockupStoredFilesManager()

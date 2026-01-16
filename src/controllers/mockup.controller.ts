@@ -1,7 +1,8 @@
 import { Request, Response } from "express"
 import { TRestoreMockupBodySchema } from "../types/api"
 import { htmlGeneratorService } from "../services/html-generator.service"
-import { canvasPainterService } from "../services/canvas-painter.service"
+import { canvasPainterService } from "../services/canvas-generator.service"
+import { restoreMockupService } from "../services/restore-mockup.service"
 
 type TLocalBlobURLField = {
   local_blobs: Express.Multer.File[]
@@ -15,35 +16,9 @@ export class MockupController {
       console.log(">>> [controller] input data:", data)
 
       const files = req.files as TLocalBlobURLField
-      console.log(">>> [controller] input files:", files.local_blobs)
+      console.log(">>> [controller] input files:", files)
 
-      try {
-        await Promise.all([
-          (async () => {
-            const htmlStartTime = performance.now()
-            await htmlGeneratorService.generateMockupHTML(structuredClone(data), files.local_blobs)
-            const htmlEndTime = performance.now()
-            console.log(
-              `>>> ✅ [controller] HTML generation took ${Math.round(
-                htmlEndTime - htmlStartTime
-              )}ms`
-            )
-          })(),
-          (async () => {
-            const canvasStartTime = performance.now()
-            await canvasPainterService.generateMockupImage(structuredClone(data), files.local_blobs)
-            const canvasEndTime = performance.now()
-            console.log(
-              `>>> ✅ [controller] Canvas generation took ${Math.round(
-                canvasEndTime - canvasStartTime
-              )}ms`
-            )
-          })(),
-        ])
-      } catch (err) {
-        console.log(">>> ❌ [controller] Canvas error:", err)
-        throw new Error("Error generating mockup canvas or HTML")
-      }
+      await restoreMockupService.restoreMockup(data, files.local_blobs)
 
       const endTime = performance.now()
       const processingTime = Math.round(endTime - startTime)

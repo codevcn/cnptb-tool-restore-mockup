@@ -12,13 +12,13 @@ import {
   TLayoutSlotForCanvas,
   TMockupId,
 } from "../types/api"
-import { TMulterFiles } from "../types/global"
+import { TMulterFiles, TUsedStoredFileNames } from "../types/global"
 import { endpoints, elementDefaultStyles } from "../configs/contants"
 import path from "path"
-import fs from "fs"
-import { mkdir, writeFile } from "fs/promises"
+import { access, mkdir, readFile, writeFile } from "fs/promises"
 import { mockupStoredFilesManager } from "../configs/mockup-stored-files-manager"
 import { generateMediaURLByStoredFilePath } from "../utils/helpers"
+import { tempDir } from "../configs/upload-file"
 
 type TStoredMediaFiles = TMulterFiles
 
@@ -37,7 +37,8 @@ class CanvasPainterService {
    */
   async generateMockupImage(
     data: TRestoreMockupBodySchema,
-    storedFiles: TStoredMediaFiles
+    storedFiles: TStoredMediaFiles,
+    usedStoredFileNames: TUsedStoredFileNames
   ): Promise<void> {
     console.log(">>> [canvas] Starting canvas painting with node-canvas...")
 
@@ -74,6 +75,7 @@ class CanvasPainterService {
       await this.drawBackgroundImage(
         product.mockup.imageURL,
         storedFiles,
+        usedStoredFileNames,
         imageCache,
         originalContainer,
         ctx
@@ -91,6 +93,7 @@ class CanvasPainterService {
           allowedPrintArea,
           originalContainer,
           storedFiles,
+          usedStoredFileNames,
           imageCache,
           canvas,
           ctx
@@ -128,6 +131,7 @@ class CanvasPainterService {
               element as TPrintedImageVisualState,
               mockupId,
               storedFiles,
+              usedStoredFileNames,
               imageCache,
               canvas,
               ctx
@@ -137,6 +141,7 @@ class CanvasPainterService {
               element as TStickerVisualState,
               mockupId,
               storedFiles,
+              usedStoredFileNames,
               imageCache,
               canvas,
               ctx
@@ -157,7 +162,7 @@ class CanvasPainterService {
       this.clearCache(imageCache)
 
       // 7. Export to file
-      await this.exportCanvas(data.mockupId, canvas)
+      await this.saveCanvasToFile(data.mockupId, canvas)
     } catch (error) {
       console.error(">>> ❌ [canvas] Error during canvas painting:", error)
       throw error
@@ -189,11 +194,12 @@ class CanvasPainterService {
   private async drawBackgroundImage(
     imageUrl: string,
     files: TMulterFiles,
+    usedStoredFileNames: TUsedStoredFileNames,
     imageCache: Map<string, Image>,
     originalContainer: TPrintAreaContainerWrapper,
     ctx: CanvasRenderingContext2D
   ): Promise<void> {
-    const image = await this.loadImage(imageUrl, files, imageCache)
+    const image = await this.loadImage(imageUrl, files, usedStoredFileNames, imageCache)
 
     // Draw image to fill canvas (contain mode)
     const originalContainerRatio = originalContainer.width / originalContainer.height
@@ -264,6 +270,7 @@ class CanvasPainterService {
     allowedPrintArea: TAllowedPrintArea,
     originalContainer: TPrintAreaContainerWrapper,
     files: TMulterFiles,
+    usedStoredFileNames: TUsedStoredFileNames,
     imageCache: Map<string, Image>,
     canvas: Canvas,
     ctx: CanvasRenderingContext2D
@@ -272,7 +279,12 @@ class CanvasPainterService {
     ctx.save()
     for (const slot of layoutSlotsForCanvas) {
       const { placedImage, height, width, x, y } = slot
-      const image = await this.loadImage(placedImage.imageURL, files, imageCache)
+      const image = await this.loadImage(
+        placedImage.imageURL,
+        files,
+        usedStoredFileNames,
+        imageCache
+      )
 
       const slotLeft = x - originalContainer.x
       const slotTop = y - originalContainer.y
@@ -337,6 +349,7 @@ class CanvasPainterService {
     element: TPrintedImageVisualState,
     mockupId: TMockupId,
     files: TMulterFiles,
+    usedStoredFileNames: TUsedStoredFileNames,
     imageCache: Map<string, Image>,
     canvas: Canvas,
     ctx: CanvasRenderingContext2D
@@ -346,7 +359,7 @@ class CanvasPainterService {
     // Fetch sticker from domain
     const printedImageUrl = this.toStoredURL(mockupId, element.path, files, true)
 
-    const image = await this.loadImage(printedImageUrl, files, imageCache)
+    const image = await this.loadImage(printedImageUrl, files, usedStoredFileNames, imageCache)
 
     // Save context state
     ctx.save()
@@ -384,6 +397,7 @@ class CanvasPainterService {
     element: TStickerVisualState,
     mockupId: TMockupId,
     files: TMulterFiles,
+    usedStoredFileNames: TUsedStoredFileNames,
     imageCache: Map<string, Image>,
     canvas: Canvas,
     ctx: CanvasRenderingContext2D
@@ -393,7 +407,7 @@ class CanvasPainterService {
     // Fetch sticker from domain
     const stickerUrl = this.toStoredURL(mockupId, element.path, files, true)
 
-    const image = await this.loadImage(stickerUrl, files, imageCache)
+    const image = await this.loadImage(stickerUrl, files, usedStoredFileNames, imageCache)
 
     // Save context state
     ctx.save()
@@ -482,6 +496,7 @@ class CanvasPainterService {
   private async loadImage(
     url: string,
     files: TMulterFiles,
+    usedStoredFileNames: TUsedStoredFileNames,
     imageCache: Map<string, Image>
   ): Promise<Image> {
     // Check cache
@@ -500,12 +515,13 @@ class CanvasPainterService {
           throw new Error(`File not found for blob URL: ${url}`)
         }
         imagePath = file.path
+        usedStoredFileNames.add(file.filename)
       }
       // Handle HTTP URLs
       else if (url.startsWith("http://") || url.startsWith("https://")) {
         // Download to temp
         const buffer = await this.downloadRemoteImage(url)
-        const tempPath = path.join("storage/temp", `temp_${Date.now()}_${path.basename(url)}`)
+        const tempPath = path.join(tempDir, `temp_${Date.now()}_${path.basename(url)}`)
         await mkdir(path.dirname(tempPath), { recursive: true })
         await writeFile(tempPath, buffer)
         imagePath = tempPath
@@ -517,7 +533,9 @@ class CanvasPainterService {
       }
 
       // Check if file exists
-      if (!fs.existsSync(imagePath)) {
+      try {
+        await access(imagePath)
+      } catch {
         throw new Error(`Image file does not exist: ${imagePath}`)
       }
 
@@ -575,7 +593,7 @@ class CanvasPainterService {
    */
   private async convertToSupportedFormat(imagePath: string): Promise<string> {
     // Detect format by reading file signature
-    const fileBuffer = await fs.promises.readFile(imagePath)
+    const fileBuffer = await readFile(imagePath)
     const signature = fileBuffer.toString("hex", 0, 4)
 
     // Check if conversion is needed
@@ -631,7 +649,7 @@ class CanvasPainterService {
   /**
    * Export canvas to PNG file
    */
-  private async exportCanvas(mockupId: string, canvas: Canvas): Promise<string> {
+  private async saveCanvasToFile(mockupId: string, canvas: Canvas): Promise<string> {
     const pathToStoredFileDir = mockupStoredFilesManager.getMockupStoragePath(mockupId)
     if (!pathToStoredFileDir) {
       throw new Error("Invalid stored file path")

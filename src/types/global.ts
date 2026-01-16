@@ -51,3 +51,5 @@ export type TPosition = {
 }
 
 export type TElementType = "text" | "sticker" | "printed-image"
+
+export type TUsedStoredFileNames = Set<TMulterFiles[number]["filename"]>
