@@ -1,19 +1,30 @@
 import "./types"
 import "dotenv/config"
-import express, { NextFunction, Request, Response } from "express"
+import express from "express"
 import cors from "cors"
 import path from "path"
 import mockupRoutes from "./routes/mockup.routes"
-import { HttpStatusCode } from "axios"
+import { EClientRequestHeaders } from "./configs/contants"
+import { appErrorHandler } from "./utils/app.error-handler"
+
+const PORT = process.env.PORT || "4000"
+const LISTEN_ADDRESS = "0.0.0.0"
 
 const app = express()
-const PORT = process.env.PORT || 4000
 
 // Middleware
 app.use(
   cors({
-    origin: "*",
-  })
+    origin: [
+      "https://connect-photobooth-demo-ptm.vercel.app",
+      "https://connect-photobooth-ptm.vercel.app",
+      "https://project-to-test-api.vercel.app",
+      "https://hoppscotch.io",
+      "http://localhost:3000",
+    ],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", EClientRequestHeaders.FROM_LOCATION],
+  }),
 )
 app.use(express.json({ limit: "50mb" }))
 app.use(express.urlencoded({ extended: true, limit: "50mb" }))
@@ -29,34 +40,15 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: Date.now() })
 })
 
-// Error handler
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error(">>> Server error:", err)
-  res.status(500).json({
-    success: false,
-    error: {
-      code: HttpStatusCode.InternalServerError,
-      message: err.message || "Internal server error",
-    },
-  })
-})
+app.use(appErrorHandler.handleInternalError)
 
-// Initialize và start server
-async function start() {
-  app.listen(PORT, () => {
-    console.log(`>>> ✅ Server running on http://localhost:${PORT}`)
+function start() {
+  app.listen(parseInt(PORT), LISTEN_ADDRESS, () => {
+    console.log(`>>> Server running at http://${LISTEN_ADDRESS}:${PORT}`)
   })
 }
 
-// Graceful shutdown
-process.on("SIGINT", async () => {
-  console.log("\n>>> 🛑 Shutting down server...")
-  process.exit(0)
-})
-
-process.on("SIGTERM", async () => {
-  console.log("\n>>> 🛑 Shutting down server...")
-  process.exit(0)
-})
+appErrorHandler.handleUncaughtError()
+appErrorHandler.handleUnhandledRejection()
 
 start()
